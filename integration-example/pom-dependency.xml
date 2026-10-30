@@ -1,0 +1,7 @@
+<!-- Add under <dependencies> in the consuming application's pom.xml. -->
+<dependency>
+    <groupId>com.meg</groupId>
+    <artifactId>react-agent-spring-sdk</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+</dependency>
+
