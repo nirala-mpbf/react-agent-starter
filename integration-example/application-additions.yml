@@ -1,8 +1,8 @@
 # MERGE into the existing application's application.yml.
 # Keep its existing database, Redis, lakeFS, prompt, and gateway settings.
-mcp:
-  brain:
-    url: ${BRAIN_MCP_URL:http://localhost:4000/mcp}
+agent:
+  gateway:
+    mcp-url: ${AGENT_GATEWAY_MCP_URL:http://localhost:4000/mcp}
 
 react-agent:
   prompts:
@@ -13,11 +13,7 @@ react-agent:
   # Execution approvals are independent of the annotation's visibility filter.
   permissions:
     allow:
-      - get_current_status
-      - verify_otp
-      - submit_profile
-      - submit_account_statement
-      - submit_udyam_document
+      - processWorkflowCommand
 
 
 # Merge with the existing spring.flyway block. Keep existing locations/history/baseline settings.

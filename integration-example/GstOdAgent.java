@@ -8,14 +8,8 @@ import com.meg.agentsdk.core.Agent;
         workflow = "ddod",
         prompt = "onboarding_master_sop_7",
         mcp = {
-                @McpServer(name = "brain-tools", url = "${mcp.brain.url}")
+                @McpServer(name = "brain-tools", url = "${agent.gateway.mcp-url}")
         },
-        allowedTools = {
-                "get_current_status",
-                "verify_otp",
-                "submit_profile",
-                "submit_account_statement",
-                "submit_udyam_document"
-        }
+        allowedTools = {"processWorkflowCommand"}
 )
 public class GstOdAgent extends Agent {}

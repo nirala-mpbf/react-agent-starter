@@ -10,8 +10,8 @@ Java **25**, Spring Boot **4.1.1**, AgentScope **2.0.0**, lakeFS SDK **1.84.0** 
 @ReactAgentRouter(
     name = "gst-od-assistant",
     model = "${agent.model}",
-    mcp = {@McpServer(name = "brain-tools", url = "${mcp.brain.url}")},
-    allowedTools = {"get_current_status", "verify_otp"},
+    mcp = {@McpServer(name = "brain-tools", url = "${agent.gateway.mcp-url}")},
+    allowedTools = {"processWorkflowCommand"},
     workflow = "ddod",
     prompt = "onboarding_master_sop_7"
 )
@@ -34,6 +34,8 @@ Supply both workflow and prompt, or omit both. `prompt` is a kind such as `onboa
 
 Put the annotated Agent subclass under the application component-scan package (or explicitly import it). The annotation makes it a component and imports prompt configuration; do not scan SDK packages. Keep the main application class separate. Each typed agent owns its existing factory internally, without publishing a HarnessAgent.Builder bean.
 
+The Brain example exposes one tool, `processWorkflowCommand`; CREATE, GET_STATE and SUBMIT_EVENT are argument values, not separate tools. The SDK uses the schema advertised by MCP and does not hardcode a request-body wrapper. Reference-ID sourcing is not implemented; its application input contract is still undecided. The SDK does not extract reference IDs from prompts or append workflow-specific instructions.
+
 ## Enable the optional prompt feature
 
 ```yaml
@@ -45,18 +47,14 @@ react-agent:
     timeout: 30s
   permissions:
     allow:
-      - get_current_status
-      - verify_otp
+      - processWorkflowCommand
 
 agent:
   gateway:
     base-url: ${AGENT_GATEWAY_BASE_URL}
     api-key: ${AGENT_GATEWAY_API_KEY}
+    mcp-url: ${AGENT_GATEWAY_MCP_URL:http://localhost:4000/mcp}
   model: ${AGENT_MODEL:llama3.1:8b}
-
-mcp:
-  brain:
-    url: ${BRAIN_MCP_URL:http://localhost:4000/mcp}
 
 lakefs:
   endpoint: ${LAKEFS_ENDPOINT}
@@ -216,13 +214,11 @@ The original global `react-agent.permissions.allow` remains the fallback. For ag
 react-agent:
   permissions:
     agents:
-      gst:
-        allow: [get_current_status]
-      dd:
-        allow: [verify_otp]
+      gst-od-assistant:
+        allow: [processWorkflowCommand]
 ```
 
-The keys match annotation `name` values. Approval does not expose a hidden tool. Core customization hooks in the factory remain available for existing builder-based consumers.
+The keys match annotation `name` values. This example approves the whole `processWorkflowCommand` tool, not individual operations inside its arguments. Approval does not expose a hidden tool. Core customization hooks in the factory remain available for existing builder-based consumers.
 
 ## Build and verification
 
