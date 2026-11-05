@@ -1,6 +1,8 @@
 package com.meg.agentsdk.config;
 
+import io.modelcontextprotocol.spec.McpSchema.Tool;
 import com.meg.agentsdk.prompt.PromptService;
+import io.agentscope.core.agent.RuntimeContext;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -155,7 +157,7 @@ public class AgentBuilderFactoryBean
                 clientWrapper.initialize().block(timeout);
 
                 List<McpSchema.Tool> discoveredTools = Objects.requireNonNull(clientWrapper.listTools().block(timeout), "MCP tool discovery");
-                for (var tool : discoveredTools) {
+                for (Tool tool : discoveredTools) {
                     if (!discoveredNames.add(tool.name())) {
                         throw new IllegalArgumentException("Duplicate MCP tool name: " + tool.name()
                                 + ". Configure servers with distinct advertised tool names.");
@@ -222,12 +224,24 @@ public class AgentBuilderFactoryBean
         return policyBuilder.build();
     }
 
+    public HarnessAgent.Builder getObject(RuntimeContext execution) {
+        return getObject();
+    }
+
+
     @Override
     public HarnessAgent.Builder getObject() {
+        return buildWithPrompt(null);
+    }
+
+
+    public HarnessAgent.Builder buildWithPrompt(String systemPrompt) {
+
         if (!initialized || closed) {
             throw new IllegalStateException("Agent builder factory is not active");
         }
-        var toolsConfig = new ToolsConfig();
+
+        ToolsConfig toolsConfig = new ToolsConfig();
 
         // AgentScope treats an empty allowlist as unrestricted. A no-MCP agent must expose no tools.
         toolsConfig.setAllow(exposedTools.isEmpty() ? List.of("__react_agent_no_tools__") : List.copyOf(exposedTools));
@@ -254,12 +268,18 @@ public class AgentBuilderFactoryBean
                 .disableToolResultEviction()
                 .enablePendingToolRecovery(false)
                 .enableAgentTracingLog(false);
-        if (!workflow.isEmpty()) {
+        if (systemPrompt != null) {
+            builder.sysPrompt(systemPrompt);
+        } else if (!workflow.isEmpty()) {
             PromptService service = promptServices == null ? null : promptServices.getIfAvailable();
             if (service == null) {
                 throw new IllegalStateException("PromptService is unavailable; enable prompts and configure its JDBC, Redis and lakeFS dependencies");
             }
-            builder.sysPrompt(service.latest(workflow, prompt).content());
+            if (environment.getProperty("react-agent.prompts.sop-reference", Boolean.class, false)) {
+                builder.sysPrompt(service.loadSystemPrompt(workflow, prompt));
+            } else {
+                builder.sysPrompt(service.latest(workflow, prompt).content());
+            }
         }
         return builder;
     }

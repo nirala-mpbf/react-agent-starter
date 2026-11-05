@@ -1,5 +1,14 @@
 package com.meg.agentsdk.prompt;
 
+import com.meg.agentsdk.core.AgentResponse;
+import com.meg.agentsdk.prompt.PromptManagementTest.DdAgent;
+import com.meg.agentsdk.prompt.PromptManagementTest.GstAgent;
+import io.agentscope.core.message.Msg;
+import io.agentscope.harness.agent.HarnessAgent.Builder;
+import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.MockMvc;
 import com.meg.agentsdk.annotation.ReactAgentRouter;
 import com.meg.agentsdk.annotation.McpServer;
 import com.meg.agentsdk.prompt.api.*;
@@ -51,21 +60,21 @@ class PromptManagementTest {
     static class TypedScan {}
 
     @Test void scannedTypedAgentsKeepToolsAndPromptsSeparateAndRefreshEachCall() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
-            var cache = new ConcurrentHashMap<String,String>();
-            var savedAgent = new java.util.concurrent.atomic.AtomicReference<GstAgent>();
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
+            ConcurrentHashMap<String,String> cache = new ConcurrentHashMap<String,String>();
+            AtomicReference<GstAgent> savedAgent = new java.util.concurrent.atomic.AtomicReference<GstAgent>();
             enabled(backend, ds, redis(cache)).withUserConfiguration(TypedScan.class)
                     .withPropertyValues("react-agent.permissions.agents[gst].allow[0]=get_current_status",
                             "react-agent.permissions.agents[dd].allow[0]=verify_otp").run(context -> {
                 assertThat(context).hasNotFailed().hasSingleBean(GstAgent.class).hasSingleBean(DdAgent.class);
                 assertThat(context.getBeanNamesForType(HarnessAgent.Builder.class)).isEmpty();
-                var versions = context.getBean(PromptVersionRepository.class);
+                PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
                 versions.markaActivation("prompts/gst/master.md", "c0");
                 backend.prompts.put("dd0", "DD SOP");
                 versions.markaActivation("prompts/dd/master.md", "dd0");
-                var gst = context.getBean(GstAgent.class);
-                var dd = context.getBean(DdAgent.class);
+                GstAgent gst = context.getBean(GstAgent.class);
+                DdAgent dd = context.getBean(DdAgent.class);
                 savedAgent.set(gst);
                 assertThatThrownBy(() -> reactor.core.publisher.Mono.fromCallable(() -> gst.ask("bad blocking call"))
                         .subscribeOn(reactor.core.scheduler.Schedulers.parallel()).block())
@@ -80,7 +89,7 @@ class PromptManagementTest {
                     context.getBean(PromptService.class).save("gst", "master",
                             new ByteArrayResource("System SOP version c1".getBytes()));
                 } catch (Exception error) { throw new AssertionError(error); }
-                var replies = reactor.core.publisher.Flux.range(0, 4)
+                List<AgentResponse> replies = reactor.core.publisher.Flux.range(0, 4)
                         .flatMap(i -> gst.askAsync("parallel-" + i)).collectList().block(Duration.ofSeconds(20));
                 assertThat(replies).hasSize(4).allSatisfy(reply ->
                         assertThat(reply.content()).startsWith("System SOP version c1|parallel-"));
@@ -140,11 +149,11 @@ class PromptManagementTest {
 
     private static DataSource database() {
         String pg = System.getenv("SDK_PROMPT_TEST_POSTGRES_URL");
-        var ds = new DriverManagerDataSource();
+        DriverManagerDataSource ds = new DriverManagerDataSource();
         ds.setUrl(pg == null ? "jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1" : pg);
         ds.setUsername(pg == null ? "sa" : "postgres");
         ds.setPassword("");
-        var jdbc = new JdbcTemplate(ds);
+        JdbcTemplate jdbc = new JdbcTemplate(ds);
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS prompt_versions (
                     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -160,7 +169,7 @@ class PromptManagementTest {
     }
 
     private StringRedisTemplate redis(Map<String,String> entries) {
-        var redis = mock(StringRedisTemplate.class);
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
         ValueOperations<String,String> values = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(values);
         when(values.get(anyString())).thenAnswer(call -> entries.get(call.getArgument(0, String.class)));
@@ -217,9 +226,9 @@ class PromptManagementTest {
     }
 
     @Test void enabledServicesDoNotAutomaticallyExposeControllerAndCustomServiceIsPreserved() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
-            var custom = mock(PromptService.class);
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
+            PromptService custom = mock(PromptService.class);
             enabled(backend, ds, redis(new ConcurrentHashMap<>())).withUserConfiguration(CoreAgent.class)
                     .withBean(PromptService.class, () -> custom).run(context -> {
                         assertThat(context).hasNotFailed().hasSingleBean(PromptService.class).doesNotHaveBean(PromptController.class);
@@ -229,31 +238,31 @@ class PromptManagementTest {
     }
 
     @Test void freshBuildersFetchActivePromptAndUseOriginalCacheInvalidationFlow() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
-            var cache = new ConcurrentHashMap<String,String>();
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
+            ConcurrentHashMap<String,String> cache = new ConcurrentHashMap<String,String>();
             enabled(backend, ds, redis(cache)).withUserConfiguration(PromptedAgent.class)
                     .withPropertyValues("react-agent.permissions.allow[0]=get_current_status").run(context -> {
                 assertThat(context).hasNotFailed();
-                var versions = context.getBean(PromptVersionRepository.class);
+                PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
                 versions.markaActivation("prompts/ddod/master.md", "c0");
-                var builders = context.getBeanProvider(HarnessAgent.Builder.class);
-                try (var first = builders.getObject().build()) {
-                    var reply = first.call(new io.agentscope.core.message.UserMessage("first"),
+                ObjectProvider<Builder> builders = context.getBeanProvider(HarnessAgent.Builder.class);
+                try (HarnessAgent first = builders.getObject().build()) {
+                    Msg reply = first.call(new io.agentscope.core.message.UserMessage("first"),
                             io.agentscope.core.agent.RuntimeContext.builder().userId("u").sessionId("s1").build()).block();
                     assertThat(reply.getTextContent()).isEqualTo("System SOP|first");
                 }
                 assertThat(backend.downloads.get()).isEqualTo(1);
-                try (var second = builders.getObject().build()) {
+                try (HarnessAgent second = builders.getObject().build()) {
                     assertThat(second.getToolkit().getToolNames()).containsExactly("get_current_status");
                 }
                 assertThat(backend.downloads.get()).isEqualTo(1); // Original Redis hit path.
-                var prompts = context.getBean(PromptService.class);
-                var saved = prompts.save("ddod", "master", new ByteArrayResource("System SOP version c1".getBytes()));
+                PromptService prompts = context.getBean(PromptService.class);
+                SavePromptResponse saved = prompts.save("ddod", "master", new ByteArrayResource("System SOP version c1".getBytes()));
                 assertThat(saved.commitId()).isEqualTo("c1");
                 assertThat(cache).isEmpty(); // Original save flow evicts the old entry.
-                try (var third = builders.getObject().build()) {
-                    var reply = third.call(new io.agentscope.core.message.UserMessage("after"),
+                try (HarnessAgent third = builders.getObject().build()) {
+                    Msg reply = third.call(new io.agentscope.core.message.UserMessage("after"),
                             io.agentscope.core.agent.RuntimeContext.builder().userId("u").sessionId("s2").build()).block();
                     assertThat(reply.getTextContent()).isEqualTo("System SOP version c1|after");
                 }
@@ -267,16 +276,16 @@ class PromptManagementTest {
     }
 
     @Test void activationRollsBackOnInsertFailureAndKeepsHistory() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
             enabled(backend, ds, redis(new ConcurrentHashMap<>())).withUserConfiguration(CoreAgent.class).run(context -> {
-                var versions = context.getBean(PromptVersionRepository.class);
+                PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
                 versions.markaActivation("prompts/ddod/master.md", "c0");
                 assertThatThrownBy(() -> versions.markaActivation("prompts/ddod/master.md", null))
                         .isInstanceOf(org.springframework.dao.DataAccessException.class);
                 assertThat(versions.getActiveCommitId("prompts/ddod/master.md")).isEqualTo("c0");
                 versions.markaActivation("prompts/ddod/master.md", "c1");
-                var jdbc = new JdbcTemplate(ds);
+                JdbcTemplate jdbc = new JdbcTemplate(ds);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM prompt_versions", Integer.class)).isEqualTo(2);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM prompt_versions WHERE is_active=TRUE", Integer.class)).isEqualTo(1);
             });
@@ -284,12 +293,12 @@ class PromptManagementTest {
     }
 
     @Test void redisOutageFallsBackToLakefsAndHttpErrorsRemainExplicit() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
-            var redis = mock(StringRedisTemplate.class);
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
+            StringRedisTemplate redis = mock(StringRedisTemplate.class);
             when(redis.opsForValue()).thenThrow(new DataAccessResourceFailureException("Redis offline"));
             enabled(backend, ds, redis).withUserConfiguration(CoreAgent.class).run(context -> {
-                var versions = context.getBean(PromptVersionRepository.class);
+                PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
                 versions.markaActivation("prompts/ddod/master.md", "c0");
                 assertThat(context.getBean(PromptService.class).latest("ddod", "master").content()).isEqualTo("System SOP");
                 versions.markaActivation("prompts/ddod/master.md", "missing");
@@ -300,8 +309,8 @@ class PromptManagementTest {
     }
 
     @Test void controllerRequiresExplicitFlagAndServesTheExistingLatestApi() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
             web(backend, ds, redis(new ConcurrentHashMap<>())).run(context -> {
                 assertThat(context).hasNotFailed().doesNotHaveBean(PromptController.class);
             });
@@ -319,12 +328,12 @@ class PromptManagementTest {
     }
 
     @Test void uploadEndpointKeepsMarkdownValidationAndActivatesUploadedPrompt() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
             web(backend, ds, redis(new ConcurrentHashMap<>())).withPropertyValues("react-agent.prompts.controller-enabled=true")
                     .run(context -> {
-                        var mvc = MockMvcBuilders.webAppContextSetup(context).build();
-                        var metadata = new org.springframework.mock.web.MockMultipartFile("metadata", "", "application/json",
+                        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
+                        MockMultipartFile metadata = new org.springframework.mock.web.MockMultipartFile("metadata", "", "application/json",
                                 "{\"workflow\":\"ddod\",\"kind\":\"master\"}".getBytes());
                         mvc.perform(multipart("/api/v1/prompts").file(metadata)
                                         .file(new org.springframework.mock.web.MockMultipartFile("file", "wrong.txt", "text/plain", "SOP".getBytes()))
@@ -340,11 +349,11 @@ class PromptManagementTest {
     }
 
     @Test void promptExceptionAdviceDoesNotHandleOtherControllers() throws Exception {
-        try (var backend = new HttpBackend()) {
-            var ds = database();
+        try (HttpBackend backend = new HttpBackend()) {
+            DataSource ds = database();
             web(backend, ds, redis(new ConcurrentHashMap<>())).withBean(UnrelatedController.class)
                     .withPropertyValues("react-agent.prompts.controller-enabled=true").run(context -> {
-                        var mvc = MockMvcBuilders.webAppContextSetup(context).build();
+                        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
                         mvc.perform(post("/api/v1/prompts").header("X-Action", "latest").contentType("application/json")
                                         .content("{\"workflow\":\"ddod\",\"kind\":\"missing\"}"))
                                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.error").exists());
@@ -354,7 +363,7 @@ class PromptManagementTest {
     }
 
     @Test void originalPromptValidationRejectsBlankOversizedAndInvalidNames() {
-        var prompts = new PromptService(mock(LakeFSService.class), mock(PromptVersionRepository.class),
+        PromptService prompts = new PromptService(mock(LakeFSService.class), mock(PromptVersionRepository.class),
                 mock(PromptCacheService.class), "repo", "main");
         assertThatThrownBy(() -> prompts.save("../bad", "master", new ByteArrayResource("SOP".getBytes()))).isInstanceOf(LakefsException.class);
         assertThatThrownBy(() -> prompts.save("ddod", "master", new ByteArrayResource(" ".getBytes()))).isInstanceOf(LakefsException.class);

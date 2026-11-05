@@ -17,7 +17,9 @@ public class ChatService {
 
     public Mono<ChatResponse> chat(ChatRequest request) {
         RuntimeContext context = RuntimeContext.builder()
-                .userId(request.userId()).sessionId(request.sessionId()).build();
+                .userId(request.userId())
+                .sessionId(request.sessionId())
+                .build();
         return agent.askAsync(request.message(), context)
                 .map(reply -> new ChatResponse(request.sessionId(), reply.content()));
     }

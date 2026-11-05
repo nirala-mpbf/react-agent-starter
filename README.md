@@ -34,7 +34,7 @@ Supply both workflow and prompt, or omit both. `prompt` is a kind such as `onboa
 
 Put the annotated Agent subclass under the application component-scan package (or explicitly import it). The annotation makes it a component and imports prompt configuration; do not scan SDK packages. Keep the main application class separate. Each typed agent owns its existing factory internally, without publishing a HarnessAgent.Builder bean.
 
-The Brain example exposes one tool, `processWorkflowCommand`; CREATE, GET_STATE and SUBMIT_EVENT are argument values, not separate tools. The SDK uses the schema advertised by MCP and does not hardcode a request-body wrapper. Reference-ID sourcing is not implemented; its application input contract is still undecided. The SDK does not extract reference IDs from prompts or append workflow-specific instructions.
+The Brain example exposes one tool, `processWorkflowCommand`; CREATE, GET_STATE and SUBMIT_EVENT are argument values, not separate tools. The SDK uses the schema advertised by MCP and does not hardcode a request-body wrapper. With react-agent.prompts.sop-reference=true, the SDK loads the SOP selected by the annotation and prepares the effective prompt. ChatService passes the message and context to askAsync.
 
 ## Enable the optional prompt feature
 
@@ -230,6 +230,7 @@ The keys match annotation `name` values. This example approves the whole `proces
 Tests cover two component-scanned typed agents with separate prompts/tools and approval lists, sync/async calls, concurrent requests, shutdown rejection, prompt refresh, and original core behavior, optional dependency/feature gating, paired prompt selection, custom prompt beans, transactional activation, Redis fallback/eviction, real local model/MCP/lakeFS HTTP calls, prompt refresh, upload/latest endpoints, and scoped exception handling.
 
 Default JDBC tests use H2. An additional run uses disposable PostgreSQL with the actual migration/index. Real Redis behavior is represented by test doubles; no existing business infrastructure is called.
+
 
 
 

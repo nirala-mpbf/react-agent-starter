@@ -1,5 +1,6 @@
 package com.meg.agentsdk.config;
 
+import java.util.concurrent.atomic.AtomicInteger;
 import com.meg.agentsdk.annotation.ReactAgentRouter;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import io.agentscope.harness.agent.HarnessAgent;
@@ -69,8 +70,8 @@ class ReactAgentRegistrationTest {
     }
 
     @Test void customFactoryHooksCanBeRegisteredAsASpringBean() {
-        var modelCalls = new java.util.concurrent.atomic.AtomicInteger();
-        var permissionCalls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger modelCalls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger permissionCalls = new java.util.concurrent.atomic.AtomicInteger();
         runner().withInitializer(context -> ((org.springframework.context.support.GenericApplicationContext) context).registerBean("customBuilder", AgentBuilderFactoryBean.class,
                 () -> new AgentBuilderFactoryBean("custom", "", List.of(), List.of(), context.getEnvironment()) {
                     @Override protected io.agentscope.core.model.Model createModel() {
@@ -97,7 +98,7 @@ class ReactAgentRegistrationTest {
     }
 
     @Test void springContextShutdownClosesSharedConnections() {
-        var client = mock(McpClientWrapper.class);
+        McpClientWrapper client = mock(McpClientWrapper.class);
         when(client.getName()).thenReturn("brain");
         when(client.initialize()).thenReturn(Mono.empty());
         when(client.listTools()).thenReturn(Mono.just(List.of()));

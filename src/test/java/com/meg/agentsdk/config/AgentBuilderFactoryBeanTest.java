@@ -1,5 +1,15 @@
 package com.meg.agentsdk.config;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.sun.net.httpserver.HttpServer;
+import io.agentscope.core.message.Msg;
+import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.HarnessAgent.Builder;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
+import java.io.OutputStream;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.springframework.beans.factory.ObjectProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -21,10 +31,10 @@ class AgentBuilderFactoryBeanTest {
     }
 
     private McpClientWrapper client(String name, String... names) throws Exception {
-        var client = mock(McpClientWrapper.class);
+        McpClientWrapper client = mock(McpClientWrapper.class);
         when(client.getName()).thenReturn(name);
         when(client.initialize()).thenReturn(Mono.empty());
-        var tools = new ArrayList<McpSchema.Tool>();
+        ArrayList<Tool> tools = new ArrayList<McpSchema.Tool>();
         for (String tool : names) {
             tools.add(new ObjectMapper().readValue("""
                     {"name":"%s","description":"test","inputSchema":{"type":"object","properties":{}}}
@@ -36,7 +46,7 @@ class AgentBuilderFactoryBeanTest {
 
     private AgentBuilderFactoryBean factory(List<AgentBuilderFactoryBean.Endpoint> endpoints,
             List<String> tools, MockEnvironment env, McpClientWrapper... clients) {
-        var queue = new ArrayDeque<>(List.of(clients));
+        ArrayDeque<McpClientWrapper> queue = new ArrayDeque<>(List.of(clients));
         return new AgentBuilderFactoryBean("test", "", endpoints, tools, env) {
             @Override protected McpClientWrapper getMcpClientWrapper(Endpoint endpoint, Duration timeout) {
                 return queue.removeFirst();
@@ -49,14 +59,14 @@ class AgentBuilderFactoryBeanTest {
     }
 
     @Test void preservesAdvertisedNamesAndFiltersOnlyRequestedTools() throws Exception {
-        var client = client("brain", "get_current_status", "verify_otp");
-        var factory = factory(List.of(endpoint("brain")), List.of("get_current_status"), environment(), client);
+        McpClientWrapper client = client("brain", "get_current_status", "verify_otp");
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of("get_current_status"), environment(), client);
         factory.afterPropertiesSet();
         try {
-            try (var agent = factory.getObject().sysPrompt("one").build()) {
+            try (HarnessAgent agent = factory.getObject().sysPrompt("one").build()) {
                 assertThat(agent.getToolkit().getToolNames()).containsExactly("get_current_status");
             }
-            try (var agent = factory.getObject().sysPrompt("two").build()) {
+            try (HarnessAgent agent = factory.getObject().sysPrompt("two").build()) {
                 assertThat(agent.getToolkit().getToolNames()).containsExactly("get_current_status");
             }
             verify(client, never()).close();
@@ -68,26 +78,26 @@ class AgentBuilderFactoryBeanTest {
     }
 
     @Test void omittedFilterExposesAllMcpToolsWithoutAddingApprovals() throws Exception {
-        var client = client("brain", "get_current_status", "verify_otp");
-        var factory = factory(List.of(endpoint("brain")), List.of(), environment(), client);
+        McpClientWrapper client = client("brain", "get_current_status", "verify_otp");
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(), environment(), client);
         factory.afterPropertiesSet();
-        try (var agent = factory.getObject().build()) {
+        try (HarnessAgent agent = factory.getObject().build()) {
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("get_current_status", "verify_otp");
             assertThat(factory.configurePermissions().getAllowRules()).isEmpty();
         } finally { factory.destroy(); }
     }
 
     @Test void noMcpMeansNoToolsIncludingBuiltInTools() {
-        var factory = factory(List.of(), List.of(), environment());
+        AgentBuilderFactoryBean factory = factory(List.of(), List.of(), environment());
         factory.afterPropertiesSet();
-        try (var agent = factory.getObject().build()) {
+        try (HarnessAgent agent = factory.getObject().build()) {
             assertThat(agent.getToolkit().getToolNames()).isEmpty();
         } finally { factory.destroy(); }
     }
 
     @Test void executionApprovalsAreExplicitAndIndependent() throws Exception {
-        var env = environment().withProperty("react-agent.permissions.allow[0]", "verify_otp");
-        var factory = factory(List.of(endpoint("brain")), List.of(), env,
+        MockEnvironment env = environment().withProperty("react-agent.permissions.allow[0]", "verify_otp");
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(), env,
                 client("brain", "verify_otp", "get_current_status"));
         factory.afterPropertiesSet();
         try {
@@ -99,27 +109,27 @@ class AgentBuilderFactoryBeanTest {
     }
 
     @Test void invalidVisibilityClosesConnectionsDuringFailedStartup() throws Exception {
-        var client = client("brain", "get_current_status");
-        var factory = factory(List.of(endpoint("brain")), List.of("not_discovered"), environment(), client);
+        McpClientWrapper client = client("brain", "get_current_status");
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of("not_discovered"), environment(), client);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("undiscovered");
         verify(client).close();
     }
 
     @Test void invalidApprovalClosesConnectionsDuringFailedStartup() throws Exception {
-        var client = client("brain", "get_current_status");
-        var env = environment().withProperty("react-agent.permissions.allow[0]", "not_discovered");
-        var factory = factory(List.of(endpoint("brain")), List.of(), env, client);
+        McpClientWrapper client = client("brain", "get_current_status");
+        MockEnvironment env = environment().withProperty("react-agent.permissions.allow[0]", "not_discovered");
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(), env, client);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("unavailable");
         verify(client).close();
     }
 
     @Test void supportsMultipleServersWithDistinctActualToolNames() throws Exception {
-        var brain = client("brain", "get_current_status");
-        var lentra = client("lentra", "submit_profile");
-        var factory = factory(List.of(endpoint("brain"), endpoint("lentra")),
+        McpClientWrapper brain = client("brain", "get_current_status");
+        McpClientWrapper lentra = client("lentra", "submit_profile");
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")),
                 List.of("get_current_status", "submit_profile"), environment(), brain, lentra);
         factory.afterPropertiesSet();
-        try (var agent = factory.getObject().build()) {
+        try (HarnessAgent agent = factory.getObject().build()) {
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("get_current_status", "submit_profile");
         } finally { factory.destroy(); }
         verify(brain).close();
@@ -127,29 +137,29 @@ class AgentBuilderFactoryBeanTest {
     }
 
     @Test void rejectsDuplicateToolNamesAndClosesEveryOpenedClient() throws Exception {
-        var first = client("brain", "status");
-        var second = client("lentra", "status");
-        var factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
+        McpClientWrapper first = client("brain", "status");
+        McpClientWrapper second = client("lentra", "status");
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("Duplicate MCP tool name");
         verify(first).close();
         verify(second).close();
     }
 
     @Test void discoveryFailureClosesTheFailingAndEarlierClients() throws Exception {
-        var first = client("brain", "status");
-        var second = client("lentra", "submit");
+        McpClientWrapper first = client("brain", "status");
+        McpClientWrapper second = client("lentra", "submit");
         when(second.listTools()).thenReturn(Mono.error(new IllegalStateException("server disconnected")));
-        var factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("server disconnected");
         verify(first).close();
         verify(second).close();
     }
 
     @Test void closingOneClientDoesNotPreventClosingTheOthers() throws Exception {
-        var first = client("brain", "status");
-        var second = client("lentra", "submit");
+        McpClientWrapper first = client("brain", "status");
+        McpClientWrapper second = client("lentra", "submit");
         doThrow(new IllegalStateException("close failed")).when(first).close();
-        var factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
         factory.afterPropertiesSet();
         factory.destroy();
         verify(first).close();
@@ -172,16 +182,16 @@ class AgentBuilderFactoryBeanTest {
     static class LiveConfiguration {}
 
     @Test void realHttpMcpToolCallWorksAcrossFreshAgents() throws Exception {
-        var mapper = new ObjectMapper();
-        var toolCalls = new java.util.concurrent.atomic.AtomicInteger();
-        var modelCalls = new java.util.concurrent.atomic.AtomicInteger();
-        var requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
-        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        ObjectMapper mapper = new ObjectMapper();
+        AtomicInteger toolCalls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger modelCalls = new java.util.concurrent.atomic.AtomicInteger();
+        CopyOnWriteArrayList<String> requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        HttpServer server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/mcp", exchange -> {
             if (!exchange.getRequestMethod().equals("POST")) {
                 exchange.sendResponseHeaders(405, -1); exchange.close(); return;
             }
-            var input = mapper.readTree(exchange.getRequestBody());
+            JsonNode input = mapper.readTree(exchange.getRequestBody());
             if (!input.has("id")) {
                 exchange.sendResponseHeaders(202, -1); exchange.close(); return;
             }
@@ -200,7 +210,7 @@ class AgentBuilderFactoryBeanTest {
             byte[] data = mapper.writeValueAsBytes(Map.of("jsonrpc", "2.0", "id", input.get("id"), "result", result));
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, data.length);
-            try (var out = exchange.getResponseBody()) { out.write(data); }
+            try (OutputStream out = exchange.getResponseBody()) { out.write(data); }
         });
         server.createContext("/v1", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
@@ -211,14 +221,14 @@ class AgentBuilderFactoryBeanTest {
                     ? Map.of("role", "assistant", "tool_calls", List.of(Map.of("index", 0, "id", "call-" + count,
                             "type", "function", "function", Map.of("name", "get_current_status", "arguments", "{}"))))
                     : Map.of("role", "assistant", "content", "Your status is OTP_PENDING.");
-            var chunk = Map.of("id", "test-" + count, "object", "chat.completion.chunk", "created", 1,
+            Map<String, Object> chunk = Map.of("id", "test-" + count, "object", "chat.completion.chunk", "created", 1,
                     "model", "test-model", "choices", List.of(Map.of("index", 0, "delta", delta,
                             "finish_reason", callTool ? "tool_calls" : "stop")));
             byte[] data = ("data: " + mapper.writeValueAsString(chunk) + "\n\ndata: [DONE]\n\n")
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
             exchange.sendResponseHeaders(200, data.length);
-            try (var out = exchange.getResponseBody()) { out.write(data); }
+            try (OutputStream out = exchange.getResponseBody()) { out.write(data); }
         });
         server.start();
         try {
@@ -230,10 +240,10 @@ class AgentBuilderFactoryBeanTest {
                             "react-agent.permissions.allow[0]=get_current_status", "react-agent.mcp.timeout=5s")
                     .run(context -> {
                         assertThat(context).hasNotFailed();
-                        var provider = context.getBeanProvider(io.agentscope.harness.agent.HarnessAgent.Builder.class);
+                        ObjectProvider<Builder> provider = context.getBeanProvider(io.agentscope.harness.agent.HarnessAgent.Builder.class);
                         for (int i = 0; i < 2; i++) {
-                            try (var agent = provider.getObject().sysPrompt("Use the status tool.").build()) {
-                                var reply = agent.call(new io.agentscope.core.message.UserMessage("What is my status?"),
+                            try (HarnessAgent agent = provider.getObject().sysPrompt("Use the status tool.").build()) {
+                                Msg reply = agent.call(new io.agentscope.core.message.UserMessage("What is my status?"),
                                         io.agentscope.core.agent.RuntimeContext.builder()
                                                 .userId("user").sessionId("session-" + i).build()).block(Duration.ofSeconds(15));
                                 assertThat(reply.getTextContent()).contains("OTP_PENDING");
@@ -250,9 +260,9 @@ class AgentBuilderFactoryBeanTest {
 
 
     @Test void discoveryTimeoutClosesTheConnection() throws Exception {
-        var client = client("brain", "status");
+        McpClientWrapper client = client("brain", "status");
         when(client.listTools()).thenReturn(Mono.never());
-        var factory = factory(List.of(endpoint("brain")), List.of(),
+        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(),
                 environment().withProperty("react-agent.mcp.timeout", "20ms"), client);
         assertThatThrownBy(factory::afterPropertiesSet).isInstanceOf(IllegalStateException.class);
         verify(client).close();

@@ -93,16 +93,27 @@ public abstract class Agent implements InitializingBean, DisposableBean {
      * Preserves caller context without adding conversation memory.
      */
     public Mono<AgentResponse> askAsync(String query, RuntimeContext context) {
+        return askAsync(query, context, null);
+    }
+
+    public Mono<AgentResponse> askAsync(String query, RuntimeContext context, String systemPrompt) {
         return Mono.defer(() -> {
+
             if (query == null || query.isBlank())
                 return Mono.<AgentResponse>error(new IllegalArgumentException("Query must not be blank"));
             if (context == null)
                 return Mono.<AgentResponse>error(new IllegalArgumentException("Runtime context is required"));
             if (factory == null)
                 return Mono.<AgentResponse>error(new IllegalStateException("Agent must be created by Spring"));
-            return Mono.using(() -> factory.getObject().build(),
-                    agent -> agent.call(new UserMessage(query), context)
-                            .map(reply -> new AgentResponse(reply.getTextContent())),
+
+            RuntimeContext execution = RuntimeContext.builder(context).build();
+            return Mono.using(() -> {
+                        HarnessAgent.Builder builder = factory.buildWithPrompt(systemPrompt);
+                        configureBuilder(builder, execution);
+                        return builder.build();
+                    },
+                    agent -> agent.call(new UserMessage(query), execution)
+                            .map( reply -> new AgentResponse(reply.getTextContent())),
                     HarnessAgent::close);
             // Prompt storage calls are blocking; keep them off reactive event-loop threads.
         }).subscribeOn(Schedulers.boundedElastic());
@@ -111,5 +122,9 @@ public abstract class Agent implements InitializingBean, DisposableBean {
     @Override
     public final void destroy() {
         if (factory != null) factory.destroy();
+    }
+
+    /** Optional per-execution customization; never retain the builder or request context. */
+    protected void configureBuilder(HarnessAgent.Builder builder, RuntimeContext context) {
     }
 }

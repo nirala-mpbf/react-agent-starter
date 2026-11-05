@@ -1,5 +1,7 @@
 package com.meg.agentsdk.prompt;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import java.io.OutputStream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import java.net.*;
@@ -35,7 +37,7 @@ final class HttpBackend implements AutoCloseable {
                     String content = prompts.get(ref);
                     byte[] body = (content == null ? "missing" : content).getBytes(StandardCharsets.UTF_8);
                     exchange.sendResponseHeaders(content == null ? 404 : 200, body.length);
-                    try (var out = exchange.getResponseBody()) { out.write(body); }
+                    try (OutputStream out = exchange.getResponseBody()) { out.write(body); }
                 } else if (path.endsWith("/commits")) {
                     exchange.getRequestBody().readAllBytes();
                     String commit = "c" + commits.incrementAndGet();
@@ -44,14 +46,14 @@ final class HttpBackend implements AutoCloseable {
                             "creation_date", 1, "message", "update", "meta_range_id", "x", "parents", List.of(), "metadata", Map.of()));
                     exchange.getResponseHeaders().set("Content-Type", "application/json");
                     exchange.sendResponseHeaders(201, body.length);
-                    try (var out = exchange.getResponseBody()) { out.write(body); }
+                    try (OutputStream out = exchange.getResponseBody()) { out.write(body); }
                 } else {
                     uploadBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
                     byte[] body = json.writeValueAsBytes(Map.of("path", "GST_OD.md", "checksum", "x",
                             "physical_address", "test", "mtime", 1, "size_bytes", 10, "path_type", "object"));
                     exchange.getResponseHeaders().set("Content-Type", "application/json");
                     exchange.sendResponseHeaders(201, body.length);
-                    try (var out = exchange.getResponseBody()) { out.write(body); }
+                    try (OutputStream out = exchange.getResponseBody()) { out.write(body); }
                 }
             } catch (Exception error) { errors.add(error.toString()); exchange.close(); }
         });
@@ -60,7 +62,7 @@ final class HttpBackend implements AutoCloseable {
                 if (!exchange.getRequestMethod().equals("POST")) {
                     exchange.sendResponseHeaders(405, -1); exchange.close(); return;
                 }
-                var input = json.readTree(exchange.getRequestBody());
+                JsonNode input = json.readTree(exchange.getRequestBody());
                 if (!input.has("id")) { exchange.sendResponseHeaders(202, -1); exchange.close(); return; }
                 Object result = switch (input.path("method").asText()) {
                     case "initialize" -> {
@@ -85,16 +87,16 @@ final class HttpBackend implements AutoCloseable {
                 byte[] body = json.writeValueAsBytes(Map.of("jsonrpc", "2.0", "id", input.get("id"), "result", result));
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, body.length);
-                try (var out = exchange.getResponseBody()) { out.write(body); }
+                try (OutputStream out = exchange.getResponseBody()) { out.write(body); }
             } catch (Exception error) { errors.add(error.toString()); exchange.close(); }
         });
         server.createContext("/v1", exchange -> {
             try {
-                var input = json.readTree(exchange.getRequestBody());
+                JsonNode input = json.readTree(exchange.getRequestBody());
                 modelRequests.add(input.toString());
                 String query = "", prompt = "";
                 boolean hasToolResult = false;
-                for (var message : input.path("messages")) {
+                for (JsonNode message : input.path("messages")) {
                     if (message.path("role").asText().equals("user")) query = message.path("content").asText();
                     if (message.path("role").asText().equals("system")) prompt = message.path("content").asText();
                     if (message.path("role").asText().equals("tool")) hasToolResult = true;
@@ -104,13 +106,13 @@ final class HttpBackend implements AutoCloseable {
                         "id", "call-" + query, "type", "function", "function", Map.of("name", input.path("tools").get(0).path("function").path("name").asText(),
                                 "arguments", json.writeValueAsString(Map.of("request", query))))))
                         : Map.of("role", "assistant", "content", prompt + "|" + query);
-                var chunk = Map.of("id", "test", "object", "chat.completion.chunk", "created", 1,
+                Map<String, Object> chunk = Map.of("id", "test", "object", "chat.completion.chunk", "created", 1,
                         "model", "test-model", "choices", List.of(Map.of("index", 0, "delta", delta,
                                 "finish_reason", callTool ? "tool_calls" : "stop")));
                 byte[] body = ("data: " + json.writeValueAsString(chunk) + "\n\ndata: [DONE]\n\n").getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
                 exchange.sendResponseHeaders(200, body.length);
-                try (var out = exchange.getResponseBody()) { out.write(body); }
+                try (OutputStream out = exchange.getResponseBody()) { out.write(body); }
             } catch (Exception error) { errors.add(error.toString()); exchange.close(); }
         });
         server.start();

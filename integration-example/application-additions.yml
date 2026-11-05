@@ -6,6 +6,7 @@ agent:
 
 react-agent:
   prompts:
+    sop-reference: true
     enabled: true
     controller-enabled: true # Enable only when the host protects the prompt administration endpoints.
   mcp:
