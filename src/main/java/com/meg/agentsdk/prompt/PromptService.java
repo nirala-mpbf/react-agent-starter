@@ -23,6 +23,7 @@ public class PromptService {
 
     private final Logger log = LoggerFactory.getLogger(PromptService.class);
 
+    private static final int MAX_MARKDOWN_BYTES = 1_048_576;
     private static final Pattern NAME = Pattern.compile("[a-zA-Z0-9_-]{1,100}");
 
     private final LakeFSService lakeFSService;
@@ -50,10 +51,10 @@ public class PromptService {
         if (markdownFile == null) {
             throw new LakefsException(HttpStatus.BAD_REQUEST, "Markdown resource is required");
         }
-        try ( InputStream input = markdownFile.getInputStream() ) {
+        try (InputStream input = markdownFile.getInputStream()) {
 
-            byte[] bytes = input.readNBytes(1_048_577);
-            if (bytes.length > 1_048_576) {
+            byte[] bytes = input.readNBytes(MAX_MARKDOWN_BYTES + 1);
+            if (bytes.length > MAX_MARKDOWN_BYTES) {
                 throw new LakefsException(HttpStatus.PAYLOAD_TOO_LARGE, "Markdown exceeds 1 MB");
             }
 
@@ -90,37 +91,17 @@ public class PromptService {
     public PromptResponse latest(String workflow, String kind) {
         String path = path(workflow, kind);
 
-        log.info("[PROMPT-TRACE] latest() called: workflow={}, kind={}, path={}", workflow, kind, path);
-
-        return cacheService.get(workflow + "/" + kind, path)
+        String promptId = workflow + "/" + kind;
+        return cacheService.get(promptId, path)
                 .map(response -> {
-                    log.info(
-                            "[PROMPT-TRACE] SOURCE=PROMPT_CACHE, promptId={}, ref={}, length={}",
-                            response.promptId(),
-                            response.ref(),
-                            response.content() == null ? 0 : response.content().length()
-                    );
+                    log.debug("Prompt cache hit: path={}, commitId={}", path, response.ref());
                     return response;
                 })
                 .orElseGet(() -> {
-                    log.info("[PROMPT-TRACE] Cache miss. Fetching active commit: path={}", path);
-
                     String commitId = versionRepository.getActiveCommitId(path);
-                    log.info(
-                            "[PROMPT-TRACE] SOURCE=LAKEFS_DOWNLOAD, repository={}, branch={}, path={}, commitId={}",
-                            repository, branch, path, commitId
-                    );
-
+                    log.debug("Downloading prompt from lakeFS: path={}, commitId={}", path, commitId);
                     StringBuffer content = lakeFSService.download(repository, commitId, path);
-
-                    PromptResponse response = new PromptResponse(
-                            workflow + "/" + kind,
-                            commitId,
-                            content.toString()
-                    );
-
-                    log.info("[PROMPT-TRACE] LakeFS prompt loaded: length={}", content == null ? 0 : content.length());
-
+                    PromptResponse response = new PromptResponse(promptId, commitId, content.toString());
                     cacheService.put(path, response);
                     return response;
                 });

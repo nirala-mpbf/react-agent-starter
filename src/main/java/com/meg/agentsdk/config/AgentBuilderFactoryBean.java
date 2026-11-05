@@ -284,6 +284,12 @@ public class AgentBuilderFactoryBean
                 .disableToolResultEviction()
                 .enablePendingToolRecovery(false)
                 .enableAgentTracingLog(false);
+        applySystemPrompt(builder, systemPrompt, execution);
+        return builder;
+    }
+
+    private void applySystemPrompt(
+            HarnessAgent.Builder builder, String systemPrompt, RuntimeContext execution) {
         if (systemPrompt != null) {
             builder.sysPrompt(systemPrompt);
         } else if (!workflow.isEmpty()) {
@@ -297,8 +303,7 @@ public class AgentBuilderFactoryBean
                 builder.sysPrompt(service.latest(workflow, prompt).content());
             }
         }
-        return builder;
-    }
+   }
 
     @Override
     public Class<?> getObjectType() {
