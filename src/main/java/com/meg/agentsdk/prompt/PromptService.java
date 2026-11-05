@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Pattern;
+import io.agentscope.core.agent.RuntimeContext;
 
 public class PromptService {
 
@@ -137,16 +138,27 @@ public class PromptService {
                     "(?im)^\\s*(?:TRUSTED_REFERENCE_ID|referenceId)\\s*:\\s*[\"']?([^\\s\"'`]+)"
             );
     public String loadSystemPrompt(String workflow, String promptName) {
+        return loadSystemPrompt(workflow, promptName, null);
+    }
+
+    public String loadSystemPrompt(String workflow, String promptName, RuntimeContext context) {
         PromptResponse response = latest(workflow, promptName);
         if (response == null || response.content() == null || response.content().isBlank()) {
             throw new IllegalStateException("Onboarding system prompt is empty");
         }
         String sop = response.content();
+        String referenceId = context == null ? null : context.get("referenceId", String.class);
         java.util.regex.Matcher matcher = REFERENCE_ID_PATTERN.matcher(sop);
-        if (!matcher.find()) {
-            throw new IllegalStateException("Reference ID missing from loaded onboarding SOP");
+        if (referenceId == null || referenceId.isBlank()) {
+            if (!matcher.find()) {
+                throw new IllegalStateException("Reference ID missing from loaded onboarding SOP");
+            }
+            referenceId = matcher.group(1).trim();
         }
-        String referenceId = matcher.group(1).trim();
+        if (referenceId.length() > 100) {
+            throw new IllegalArgumentException("referenceId must not exceed 100 characters");
+        }
+        sop = REFERENCE_ID_PATTERN.matcher(sop).replaceAll("").stripTrailing();
         String trustedContext = """
 
                     TRUSTED RUNTIME CONTEXT:

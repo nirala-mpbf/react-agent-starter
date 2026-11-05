@@ -108,7 +108,7 @@ public abstract class Agent implements InitializingBean, DisposableBean {
 
             RuntimeContext execution = RuntimeContext.builder(context).build();
             return Mono.using(() -> {
-                        HarnessAgent.Builder builder = factory.buildWithPrompt(systemPrompt);
+                        HarnessAgent.Builder builder = factory.buildWithPrompt(systemPrompt, execution);
                         configureBuilder(builder, execution);
                         return builder.build();
                     },

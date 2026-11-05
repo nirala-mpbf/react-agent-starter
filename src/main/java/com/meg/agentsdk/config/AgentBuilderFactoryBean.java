@@ -236,6 +236,10 @@ public class AgentBuilderFactoryBean
 
 
     public HarnessAgent.Builder buildWithPrompt(String systemPrompt) {
+        return buildWithPrompt(systemPrompt, null);
+    }
+
+    public HarnessAgent.Builder buildWithPrompt(String systemPrompt, RuntimeContext execution) {
 
         if (!initialized || closed) {
             throw new IllegalStateException("Agent builder factory is not active");
@@ -276,7 +280,7 @@ public class AgentBuilderFactoryBean
                 throw new IllegalStateException("PromptService is unavailable; enable prompts and configure its JDBC, Redis and lakeFS dependencies");
             }
             if (environment.getProperty("react-agent.prompts.sop-reference", Boolean.class, false)) {
-                builder.sysPrompt(service.loadSystemPrompt(workflow, prompt));
+                builder.sysPrompt(service.loadSystemPrompt(workflow, prompt, execution));
             } else {
                 builder.sysPrompt(service.latest(workflow, prompt).content());
             }
