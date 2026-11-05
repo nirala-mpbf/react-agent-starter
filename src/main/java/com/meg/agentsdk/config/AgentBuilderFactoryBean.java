@@ -10,7 +10,9 @@ import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionRule;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
@@ -51,6 +53,13 @@ public class AgentBuilderFactoryBean
     private String workflow = "";
     private String prompt = "";
     private ObjectProvider<PromptService> promptServices;
+    private ObjectProvider<AgentStateStore> postgresStateStores;
+
+    @Autowired
+    public void setPostgresStateStores(
+            @Qualifier("reactAgentPostgresStateStore") ObjectProvider<AgentStateStore> postgresStateStores) {
+        this.postgresStateStores = postgresStateStores;
+    }
     private boolean initialized;
     private boolean closed;
 
@@ -246,14 +255,17 @@ public class AgentBuilderFactoryBean
         }
 
         ToolsConfig toolsConfig = new ToolsConfig();
+        toolsConfig.setDeny(List.of("wait_async_results"));
 
         // AgentScope treats an empty allowlist as unrestricted. A no-MCP agent must expose no tools.
         toolsConfig.setAllow(exposedTools.isEmpty() ? List.of("__react_agent_no_tools__") : List.copyOf(exposedTools));
+        AgentStateStore postgresStateStore =
+                postgresStateStores == null ? null : postgresStateStores.getIfAvailable();
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(agentName)
                 .agentId(agentName)
                 .model(model)
-                .stateStore(new InMemoryAgentStateStore())
+                .stateStore(postgresStateStore == null ? new InMemoryAgentStateStore() : postgresStateStore)
                 .toolkit(toolkit.copy())
                 .permissionContext(configurePermissions())
                 .toolsConfig(toolsConfig)

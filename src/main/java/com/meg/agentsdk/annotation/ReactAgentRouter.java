@@ -1,5 +1,6 @@
 package com.meg.agentsdk.annotation;
 
+import com.meg.agentsdk.config.PostgresMemoryConfiguration;
 import com.meg.agentsdk.config.ReactAgentRegistrar;
 import com.meg.agentsdk.prompt.PromptConfiguration;
 import org.springframework.context.annotation.Import;
@@ -10,7 +11,7 @@ import java.lang.annotation.*;
 @Documented
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@Import({ReactAgentRegistrar.class, PromptConfiguration.class})
+@Import({ReactAgentRegistrar.class, PromptConfiguration.class, PostgresMemoryConfiguration.class})
 public @interface ReactAgentRouter {
 
     String name() default "reactAgent";

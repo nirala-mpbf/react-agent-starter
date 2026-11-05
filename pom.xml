@@ -15,9 +15,14 @@
     <description>Annotation-driven AgentScope model and MCP configuration</description>
     <properties>
         <java.version>25</java.version>
-        <agentscope.version>2.0.0</agentscope.version>
+        <agentscope.version>2.0.3</agentscope.version>
     </properties>
     <dependencies>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-postgresql</artifactId>
+            <version>${agentscope.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot</artifactId>

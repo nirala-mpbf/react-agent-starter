@@ -5,6 +5,8 @@ import com.meg.agentsdk.config.AgentBuilderFactoryBean;
 import com.meg.agentsdk.prompt.PromptService;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.state.AgentStateStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import io.agentscope.harness.agent.HarnessAgent;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
@@ -27,7 +29,8 @@ public abstract class Agent implements InitializingBean, DisposableBean {
     private AgentBuilderFactoryBean factory;
 
     @Autowired
-    final void configure(Environment environment, ObjectProvider<PromptService> prompts) {
+    final void configure(Environment environment, ObjectProvider<PromptService> prompts,
+                         @Qualifier("reactAgentPostgresStateStore") ObjectProvider<AgentStateStore> postgresStateStores) {
 
         ReactAgentRouter annotationDetails = AnnotatedElementUtils.findMergedAnnotation(ClassUtils.getUserClass(this), ReactAgentRouter.class);
 
@@ -53,6 +56,7 @@ public abstract class Agent implements InitializingBean, DisposableBean {
         factory.setWorkflow(annotationDetails.workflow());
         factory.setPrompt(annotationDetails.prompt());
         factory.setPromptServices(prompts);
+        factory.setPostgresStateStores(postgresStateStores);
     }
 
     @Override
@@ -90,7 +94,7 @@ public abstract class Agent implements InitializingBean, DisposableBean {
     }
 
     /**
-     * Preserves caller context without adding conversation memory.
+     * Uses the caller context to identify the conversation.
      */
     public Mono<AgentResponse> askAsync(String query, RuntimeContext context) {
         return askAsync(query, context, null);

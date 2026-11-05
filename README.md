@@ -2,7 +2,24 @@
 
 An annotation-driven SDK that replaces manual AgentConfig setup. Annotated classes extend Agent and become injectable Spring beans with ask/askAsync methods. The SDK builds, executes, and closes each request agent. Business logic and HTTP response mapping stay in the consuming service. The optional prompt package retains the existing prompt-management flow.
 
-Java **25**, Spring Boot **4.1.1**, AgentScope **2.0.0**, lakeFS SDK **1.84.0** match the AI service. Typed agents use inheritance and delegation, without an AOP execution interceptor. Existing builder-based configuration remains supported.
+Java **25**, Spring Boot **4.1.1**, AgentScope **2.0.3**, lakeFS SDK **1.84.0** match the AI service. Typed agents use inheritance and delegation, without an AOP execution interceptor. Existing builder-based configuration remains supported.
+
+## Integration checklist for the AI service
+
+1. Use JDK 25. Run mvn clean install from the SDK checkout on the machine building the AI service, or resolve the published artifact from your team's Maven repository.
+2. Add com.meg:react-agent-spring-sdk:0.1.0-SNAPSHOT to the AI service POM. Align any directly declared AgentScope dependencies to 2.0.3 and reload Maven in IntelliJ.
+3. Declare the typed agent as shown below. Inject it into ChatService in place of the old manual builder. Pass userId, sessionId, and optional referenceId in RuntimeContext to askAsync. With SOP reference handling enabled, the request reference takes priority and the SOP reference is the fallback.
+4. Start Brain and MCP. Configure the model gateway and MCP URL and confirm MCP advertises processWorkflowCommand. For managed prompts, configure lakeFS, Redis, and the app PostgreSQL database. Verify the selected SOP has an active prompt version and merge the SDK Flyway location if using Flyway.
+5. To enable PostgreSQL conversation memory, merge the following into the AI service's existing react-agent configuration.
+
+   ```yaml
+   react-agent:
+     memory:
+       postgres-enabled: true
+   ```
+
+   The store uses the AI service's Spring DataSource. AgentScope initializes agentscope.agentscope_sessions using that database user, which needs the required schema and table access.
+6. Run mvn clean verify for the AI service. Start it and send a status question to POST /api/v1/chat with a known referenceId. Confirm Brain receives GET_STATE. For memory, send a distinctive phrase, restart the service, and ask for the phrase using the same userId and sessionId. Check the session row in agentscope.agentscope_sessions and repeat the recall request with a different session to check isolation.
 
 ## Declare an agent
 
@@ -121,7 +138,7 @@ ChatService -> gstOdAgent.askAsync(query, context)
 
 The agent bean is shared; each execution gets independent request state and a fresh builder. Model/MCP resources are prepared once per typed agent and closed on Spring shutdown. Mono.using closes each request agent on completion, failure, or cancellation. Prompt lookup runs for each execution/subscription and is scheduled on boundedElastic because storage calls block. A Mono is lazy: calling askAsync without subscribing does not execute a request.
 
-ask is blocking; use askAsync in reactive services. Calling ask on Reactor nonblocking threads fails before starting work. Without an explicit RuntimeContext, each execution receives a fresh session ID. Neither API adds persistent conversation memory. Object[] parameters have not been added because their meaning has not been defined; use the typed RuntimeContext overload for user/session information.
+ask is blocking; use askAsync in reactive services. Calling ask on Reactor nonblocking threads fails before starting work. Without an explicit RuntimeContext, each execution receives a fresh session ID. Enable PostgreSQL memory and pass stable user and session IDs through RuntimeContext to continue a conversation across requests. Object[] parameters have not been added because their meaning has not been defined; use the typed RuntimeContext overload for user/session information.
 
 ### Existing builder API
 
