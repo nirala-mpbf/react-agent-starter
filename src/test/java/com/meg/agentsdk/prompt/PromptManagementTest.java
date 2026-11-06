@@ -4,9 +4,7 @@ import com.meg.agentsdk.core.AgentResponse;
 import com.meg.agentsdk.prompt.PromptManagementTest.DdAgent;
 import com.meg.agentsdk.prompt.PromptManagementTest.GstAgent;
 import io.agentscope.core.message.Msg;
-import io.agentscope.harness.agent.HarnessAgent.Builder;
 import java.util.concurrent.atomic.AtomicReference;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import com.meg.agentsdk.annotation.ReactAgentRouter;
@@ -121,16 +119,16 @@ class PromptManagementTest {
 
     @Configuration(proxyBeanMethods = false)
     @ReactAgentRouter
-    static class CoreAgent {}
+    static class CoreAgent extends com.meg.agentsdk.core.Agent {}
 
     @Configuration(proxyBeanMethods = false)
     @ReactAgentRouter(name = "prompted", workflow = "${test.workflow:ddod}", prompt = "${test.prompt:master}",
             mcp = @McpServer(name = "brain", url = "${test.mcp-url}"), allowedTools = "get_current_status")
-    static class PromptedAgent {}
+    static class PromptedAgent extends com.meg.agentsdk.core.Agent {}
 
     @Configuration(proxyBeanMethods = false)
     @ReactAgentRouter(workflow = "ddod")
-    static class IncompleteSelection {}
+    static class IncompleteSelection extends com.meg.agentsdk.core.Agent {}
 
     @Configuration(proxyBeanMethods = false)
     @EnableWebMvc
@@ -212,7 +210,7 @@ class PromptManagementTest {
     @Test void coreWorksWithoutOptionalStorageAndWebLibraries() {
         core().withClassLoader(new FilteredClassLoader("io.lakefs", "org.springframework.jdbc",
                 "org.springframework.data.redis", "org.springframework.web", "jakarta.servlet"))
-                .run(context -> assertThat(context).hasNotFailed().hasSingleBean(HarnessAgent.Builder.class));
+                .run(context -> assertThat(context).hasNotFailed().hasSingleBean(CoreAgent.class).doesNotHaveBean(HarnessAgent.Builder.class));
     }
 
     @Test void selectionRequiresBothAttributesAndFeatureOptIn() {
@@ -246,26 +244,16 @@ class PromptManagementTest {
                 assertThat(context).hasNotFailed();
                 PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
                 versions.markaActivation("prompts/ddod/master.md", "c0");
-                ObjectProvider<Builder> builders = context.getBeanProvider(HarnessAgent.Builder.class);
-                try (HarnessAgent first = builders.getObject().build()) {
-                    Msg reply = first.call(new io.agentscope.core.message.UserMessage("first"),
-                            io.agentscope.core.agent.RuntimeContext.builder().userId("u").sessionId("s1").build()).block();
-                    assertThat(reply.getTextContent()).isEqualTo("System SOP|first");
-                }
+                PromptedAgent agent = context.getBean(PromptedAgent.class);
+                assertThat(agent.ask("first").content()).isEqualTo("System SOP|first");
                 assertThat(backend.downloads.get()).isEqualTo(1);
-                try (HarnessAgent second = builders.getObject().build()) {
-                    assertThat(second.getToolkit().getToolNames()).containsExactly("get_current_status");
-                }
+                assertThat(agent.ask("second").content()).isEqualTo("System SOP|second");
                 assertThat(backend.downloads.get()).isEqualTo(1); // Original Redis hit path.
                 PromptService prompts = context.getBean(PromptService.class);
                 SavePromptResponse saved = prompts.save("ddod", "master", new ByteArrayResource("System SOP version c1".getBytes()));
                 assertThat(saved.commitId()).isEqualTo("c1");
                 assertThat(cache).isEmpty(); // Original save flow evicts the old entry.
-                try (HarnessAgent third = builders.getObject().build()) {
-                    Msg reply = third.call(new io.agentscope.core.message.UserMessage("after"),
-                            io.agentscope.core.agent.RuntimeContext.builder().userId("u").sessionId("s2").build()).block();
-                    assertThat(reply.getTextContent()).isEqualTo("System SOP version c1|after");
-                }
+                assertThat(agent.ask("after").content()).isEqualTo("System SOP version c1|after");
                 assertThat(backend.downloads.get()).isEqualTo(2);
                 assertThat(backend.initializations.get()).isEqualTo(1);
                 assertThat(backend.downloadAuthorization).isEqualTo("Basic YWNjZXNzOnNlY3JldA==");

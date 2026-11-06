@@ -2,14 +2,11 @@ package com.meg.agentsdk.config;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
-import io.agentscope.core.message.Msg;
 import io.agentscope.harness.agent.HarnessAgent;
-import io.agentscope.harness.agent.HarnessAgent.Builder;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import java.io.OutputStream;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.springframework.beans.factory.ObjectProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -63,10 +60,10 @@ class AgentBuilderFactoryBeanTest {
         AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of("get_current_status"), environment(), client);
         factory.afterPropertiesSet();
         try {
-            try (HarnessAgent agent = factory.getObject().sysPrompt("one").build()) {
+            try (HarnessAgent agent = factory.buildWithPrompt(null, null).sysPrompt("one").build()) {
                 assertThat(agent.getToolkit().getToolNames()).containsExactly("get_current_status");
             }
-            try (HarnessAgent agent = factory.getObject().sysPrompt("two").build()) {
+            try (HarnessAgent agent = factory.buildWithPrompt(null, null).sysPrompt("two").build()) {
                 assertThat(agent.getToolkit().getToolNames()).containsExactly("get_current_status");
             }
             verify(client, never()).close();
@@ -81,7 +78,7 @@ class AgentBuilderFactoryBeanTest {
         McpClientWrapper client = client("brain", "get_current_status", "verify_otp");
         AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(), environment(), client);
         factory.afterPropertiesSet();
-        try (HarnessAgent agent = factory.getObject().build()) {
+        try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("get_current_status", "verify_otp");
             assertThat(factory.configurePermissions().getAllowRules()).isEmpty();
         } finally { factory.destroy(); }
@@ -90,7 +87,7 @@ class AgentBuilderFactoryBeanTest {
     @Test void noMcpMeansNoToolsIncludingBuiltInTools() {
         AgentBuilderFactoryBean factory = factory(List.of(), List.of(), environment());
         factory.afterPropertiesSet();
-        try (HarnessAgent agent = factory.getObject().build()) {
+        try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
             assertThat(agent.getToolkit().getToolNames()).isEmpty();
         } finally { factory.destroy(); }
     }
@@ -129,7 +126,7 @@ class AgentBuilderFactoryBeanTest {
         AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")),
                 List.of("get_current_status", "submit_profile"), environment(), brain, lentra);
         factory.afterPropertiesSet();
-        try (HarnessAgent agent = factory.getObject().build()) {
+        try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("get_current_status", "submit_profile");
         } finally { factory.destroy(); }
         verify(brain).close();
@@ -179,7 +176,7 @@ class AgentBuilderFactoryBeanTest {
     @com.meg.agentsdk.annotation.ReactAgentRouter(name = "live", model = "${agent.model}",
         mcp = @com.meg.agentsdk.annotation.McpServer(name = "brain", url = "${test.mcp-url}"),
         allowedTools = "get_current_status")
-    static class LiveConfiguration {}
+    static class LiveConfiguration extends com.meg.agentsdk.core.Agent {}
 
     @Test void realHttpMcpToolCallWorksAcrossFreshAgents() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
@@ -240,14 +237,12 @@ class AgentBuilderFactoryBeanTest {
                             "react-agent.permissions.allow[0]=get_current_status", "react-agent.mcp.timeout=5s")
                     .run(context -> {
                         assertThat(context).hasNotFailed();
-                        ObjectProvider<Builder> provider = context.getBeanProvider(io.agentscope.harness.agent.HarnessAgent.Builder.class);
+                        LiveConfiguration agent = context.getBean(LiveConfiguration.class);
                         for (int i = 0; i < 2; i++) {
-                            try (HarnessAgent agent = provider.getObject().sysPrompt("Use the status tool.").build()) {
-                                Msg reply = agent.call(new io.agentscope.core.message.UserMessage("What is my status?"),
-                                        io.agentscope.core.agent.RuntimeContext.builder()
-                                                .userId("user").sessionId("session-" + i).build()).block(Duration.ofSeconds(15));
-                                assertThat(reply.getTextContent()).contains("OTP_PENDING");
-                            }
+                            io.agentscope.core.agent.RuntimeContext execution = io.agentscope.core.agent.RuntimeContext.builder()
+                                    .userId("user").sessionId("session-" + i).build();
+                            assertThat(agent.askAsync("What is my status?", execution, "Use the status tool.")
+                                    .block(Duration.ofSeconds(15)).content()).contains("OTP_PENDING");
                         }
                     });
             assertThat(toolCalls.get()).isEqualTo(2);

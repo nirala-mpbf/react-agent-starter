@@ -38,7 +38,7 @@ public class PromptExceptionHandler {
                     "error", "No changes detected; no new commit was created.",
                     "code", "PROMPT_UNCHANGED"));
         }
-        log.error("lakeFS request failed: HTTP={}, response={}", e.getCode(), e.getResponseBody(), e);
+        log.error("lakeFS request failed: HTTP={}", e.getCode());
         HttpStatus status = e.getCode() == 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_GATEWAY;
         String message = status == HttpStatus.NOT_FOUND
                 ? "lakeFS resource not found" : "lakeFS API request failed (HTTP " + e.getCode() + ")";
@@ -81,6 +81,6 @@ public class PromptExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> unexpected(Exception e) {
         log.error("Unexpected request failure", e);
-        return ResponseEntity.status(500).body(Map.of("error", "Unexpected server error"));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Unexpected server error"));
     }
 }

@@ -5,14 +5,12 @@ import com.meg.agentsdk.prompt.PromptService;
 import io.agentscope.core.agent.RuntimeContext;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionRule;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
-import org.springframework.beans.factory.annotation.Qualifier;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
@@ -22,7 +20,6 @@ import io.agentscope.harness.agent.tools.ToolsConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
-import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -37,7 +34,7 @@ import java.util.*;
  * supplies a fresh builder per Spring lookup. Chat execution stays in the application.
  */
 public class AgentBuilderFactoryBean
-        implements FactoryBean<HarnessAgent.Builder>, InitializingBean, DisposableBean {
+        implements InitializingBean, DisposableBean {
 
     private static final Logger log = LoggerFactory.getLogger(AgentBuilderFactoryBean.class);
 
@@ -55,9 +52,8 @@ public class AgentBuilderFactoryBean
     private ObjectProvider<PromptService> promptServices;
     private ObjectProvider<AgentStateStore> postgresStateStores;
 
-    @Autowired
     public void setPostgresStateStores(
-            @Qualifier("reactAgentPostgresStateStore") ObjectProvider<AgentStateStore> postgresStateStores) {
+            ObjectProvider<AgentStateStore> postgresStateStores) {
         this.postgresStateStores = postgresStateStores;
     }
     private boolean initialized;
@@ -80,7 +76,6 @@ public class AgentBuilderFactoryBean
         this.prompt = prompt;
     }
 
-    @Autowired
     public void setPromptServices(ObjectProvider<PromptService> promptServices) {
         this.promptServices = promptServices;
     }
@@ -233,21 +228,6 @@ public class AgentBuilderFactoryBean
         return policyBuilder.build();
     }
 
-    public HarnessAgent.Builder getObject(RuntimeContext execution) {
-        return getObject();
-    }
-
-
-    @Override
-    public HarnessAgent.Builder getObject() {
-        return buildWithPrompt(null);
-    }
-
-
-    public HarnessAgent.Builder buildWithPrompt(String systemPrompt) {
-        return buildWithPrompt(systemPrompt, null);
-    }
-
     public HarnessAgent.Builder buildWithPrompt(String systemPrompt, RuntimeContext execution) {
 
         if (!initialized || closed) {
@@ -304,16 +284,6 @@ public class AgentBuilderFactoryBean
             }
         }
    }
-
-    @Override
-    public Class<?> getObjectType() {
-        return HarnessAgent.Builder.class;
-    }
-
-    @Override
-    public boolean isSingleton() {
-        return false;
-    }
 
     @Override
     public synchronized void destroy() {

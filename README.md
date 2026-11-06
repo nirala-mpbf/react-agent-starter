@@ -2,7 +2,7 @@
 
 An annotation-driven SDK that replaces manual AgentConfig setup. Annotated classes extend Agent and become injectable Spring beans with ask/askAsync methods. The SDK builds, executes, and closes each request agent. Business logic and HTTP response mapping stay in the consuming service. The optional prompt package retains the existing prompt-management flow.
 
-Java **25**, Spring Boot **4.1.1**, AgentScope **2.0.3**, lakeFS SDK **1.84.0** match the AI service. Typed agents use inheritance and delegation, without an AOP execution interceptor. Existing builder-based configuration remains supported.
+Java **25**, Spring Boot **4.1.1**, AgentScope **2.0.3**, lakeFS SDK **1.84.0** match the AI service. Typed agents use inheritance and delegation, without an AOP execution interceptor.
 
 ## Integration checklist for the AI service
 
@@ -140,10 +140,6 @@ The agent bean is shared; each execution gets independent request state and a fr
 
 ask is blocking; use askAsync in reactive services. Calling ask on Reactor nonblocking threads fails before starting work. Without an explicit RuntimeContext, each execution receives a fresh session ID. Enable PostgreSQL memory and pass stable user and session IDs through RuntimeContext to continue a conversation across requests. Object[] parameters have not been added because their meaning has not been defined; use the typed RuntimeContext overload for user/session information.
 
-### Existing builder API
-
-An annotation on a configuration/application class that does not extend Agent still registers the original <name>Builder factory. Existing ObjectProvider<HarnessAgent.Builder> consumers continue to work. For typed agents, do not also put a duplicate annotation on the application class. The existing internal factory implementation remains the common setup path for both APIs.
-
 ## Reused prompt behavior
 
 The following logic was moved from the colleague's project, retaining its methods and behavior:
@@ -184,7 +180,6 @@ com.meg.agentsdk/
 │   ├── Agent.java
 │   └── AgentResponse.java
 ├── config/
-│   ├── ReactAgentRegistrar.java
 │   └── AgentBuilderFactoryBean.java
 └── prompt/
     ├── PromptConfiguration.java
@@ -223,7 +218,7 @@ Tests and integration examples are not packaged into the SDK JAR. The SDK has no
 
 Tool visibility and execution permissions remain separate. Unknown names/approvals and duplicate MCP tool/server names are rejected. MCP tool names are used exactly as advertised, without invented prefixes. Unapproved tools retain AgentScope's standard behavior; this API does not implement confirmation/resume.
 
-Fresh builders use independent in-memory state. Passing the same session ID does not persist conversation history. Workspace, filesystem/shell tools, memory hooks, dynamic skills, and agent tracing remain disabled by default. Existing builder-API consumers can explicitly customize a returned builder.
+Fresh builders use independent in-memory state. Passing the same session ID does not persist conversation history. Workspace, filesystem/shell tools, memory hooks, dynamic skills, and agent tracing remain disabled by default.
 
 The original global `react-agent.permissions.allow` remains the fallback. For agents with different visible tools, provide per-agent approval lists; each replaces the global list for that agent and is validated against that agent's visible tools:
 
@@ -235,7 +230,7 @@ react-agent:
         allow: [processWorkflowCommand]
 ```
 
-The keys match annotation `name` values. This example approves the whole `processWorkflowCommand` tool, not individual operations inside its arguments. Approval does not expose a hidden tool. Core customization hooks in the factory remain available for existing builder-based consumers.
+The keys match annotation `name` values. This example approves the whole `processWorkflowCommand` tool, not individual operations inside its arguments. Approval does not expose a hidden tool.
 
 ## Build and verification
 
