@@ -1,6 +1,6 @@
 package com.meg.agentsdk.annotation;
 
-import com.meg.agentsdk.config.PostgresMemoryConfiguration;
+import com.meg.agentsdk.config.MemoryConfiguration;
 import com.meg.agentsdk.prompt.PromptConfiguration;
 import org.springframework.context.annotation.Import;
 
@@ -10,7 +10,7 @@ import java.lang.annotation.*;
 @Documented
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@Import({PromptConfiguration.class, PostgresMemoryConfiguration.class})
+@Import({PromptConfiguration.class, MemoryConfiguration.class})
 public @interface ReactAgentRouter {
 
     String name() default "reactAgent";
@@ -23,7 +23,6 @@ public @interface ReactAgentRouter {
 
     String workflow() default "";
 
-    /** Prompt kind passed to PromptService.latest(workflow, prompt), not a raw file path. */
     String prompt() default "";
 }
 

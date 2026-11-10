@@ -3,21 +3,24 @@ package com.meg.agentsdk.prompt.repository;
 import com.meg.agentsdk.prompt.exception.LakefsException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 public class PromptVersionRepository {
 
     private final JdbcTemplate jdbc;
+    private final TransactionTemplate transaction;
 
-    public PromptVersionRepository(JdbcTemplate jdbc) {
+    public PromptVersionRepository(JdbcTemplate jdbc, PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
+        this.transaction = new TransactionTemplate(transactionManager);
     }
 
-    @Transactional
-    public void markaActivation(String path, String commitId) {
-
-        jdbc.update("UPDATE prompt_versions SET is_active = FALSE WHERE path = ? AND is_active = TRUE", path);
-        jdbc.update("INSERT INTO prompt_versions (path, commit_id, is_active) VALUES (?, ?, TRUE)", path, commitId);
+    public void activateVersion(String path, String commitId) {
+        transaction.executeWithoutResult(status -> {
+            jdbc.update("UPDATE prompt_versions SET is_active = FALSE WHERE path = ? AND is_active = TRUE", path);
+            jdbc.update("INSERT INTO prompt_versions (path, commit_id, is_active) VALUES (?, ?, TRUE)", path, commitId);
+        });
     }
 
     public String getActiveCommitId(String path) {

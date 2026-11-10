@@ -75,7 +75,7 @@ public class PromptService {
         String commitId = lakeFSService.uploadAndCommit(repository, branch, path, mdContent);
 
         try {
-            versionRepository.markaActivation(path, commitId);
+            versionRepository.activateVersion(path, commitId);
 
         } catch (RuntimeException e) {
             log.error("lakeFS commit {} for path {} succeeded but metadata persistence failed", commitId, path, e);

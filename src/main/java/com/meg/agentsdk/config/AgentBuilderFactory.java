@@ -5,6 +5,8 @@ import com.meg.agentsdk.prompt.PromptService;
 import io.agentscope.core.agent.RuntimeContext;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.beans.factory.ObjectProvider;
+import io.agentscope.core.model.ExecutionConfig;
+import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
@@ -31,12 +33,12 @@ import java.util.*;
 
 /**
  * Reads environment settings, prepares shared model/MCP resources once, and
- * supplies a fresh builder per Spring lookup. Chat execution stays in the application.
+ * supplies a fresh builder per agent request. Chat execution stays in the application.
  */
-public class AgentBuilderFactoryBean
+public class AgentBuilderFactory
         implements InitializingBean, DisposableBean {
 
-    private static final Logger log = LoggerFactory.getLogger(AgentBuilderFactoryBean.class);
+    private static final Logger log = LoggerFactory.getLogger(AgentBuilderFactory.class);
 
     private final String agentName;
     private final String modelName;
@@ -50,16 +52,11 @@ public class AgentBuilderFactoryBean
     private String workflow = "";
     private String prompt = "";
     private ObjectProvider<PromptService> promptServices;
-    private ObjectProvider<AgentStateStore> postgresStateStores;
-
-    public void setPostgresStateStores(
-            ObjectProvider<AgentStateStore> postgresStateStores) {
-        this.postgresStateStores = postgresStateStores;
-    }
+    private ObjectProvider<AgentStateStore> stateStores;
     private boolean initialized;
     private boolean closed;
 
-    public AgentBuilderFactoryBean(String agentName, String modelName, List<Endpoint> endpoints,
+    public AgentBuilderFactory(String agentName, String modelName, List<Endpoint> endpoints,
                                    List<String> allowedTools, Environment environment) {
         this.agentName = agentName;
         this.modelName = modelName;
@@ -78,6 +75,9 @@ public class AgentBuilderFactoryBean
 
     public void setPromptServices(ObjectProvider<PromptService> promptServices) {
         this.promptServices = promptServices;
+    }
+    public void setStateStores(ObjectProvider<AgentStateStore> stateStores) {
+        this.stateStores = stateStores;
     }
 
     @Override
@@ -104,9 +104,7 @@ public class AgentBuilderFactoryBean
         }
     }
 
-    /**
-     * Override when an application needs a different AgentScope model provider.
-     */
+    //Override when needs a different AgentScope model provider.
     protected Model createModel() {
 
         String selectedModel = environment.resolveRequiredPlaceholders(modelName).trim();
@@ -115,11 +113,37 @@ public class AgentBuilderFactoryBean
             selectedModel = requiredProperty("agent.model");
         }
 
-        return OpenAIChatModel.builder()
+        OpenAIChatModel.Builder builder = OpenAIChatModel.builder()
                 .baseUrl(requiredProperty("agent.gateway.base-url"))
                 .apiKey(requiredProperty("agent.gateway.api-key"))
-                .modelName(selectedModel)
-                .build();
+                .modelName(selectedModel);
+
+        String prefix = "react-agent.model.retry";
+        Integer maxAttempts = environment.getProperty(prefix + ".max-attempts", Integer.class);
+
+        if (maxAttempts != null) {
+
+            Binder binder = Binder.get(environment);
+            Duration initialBackoff = binder.bind(prefix + ".initial-backoff", Duration.class)
+                    .orElseThrow(() -> new IllegalStateException("Set " + prefix + ".initial-backoff"));
+            Duration maxBackoff = binder.bind(prefix + ".max-backoff", Duration.class)
+                    .orElseThrow(() -> new IllegalStateException("Set " + prefix + ".max-backoff"));
+
+            if (maxAttempts < 1 || initialBackoff.isZero() || initialBackoff.isNegative() || maxBackoff.compareTo(initialBackoff) < 0) {
+                throw new IllegalArgumentException("Invalid model retry attempts or backoff settings");
+            }
+
+            ExecutionConfig retry = ExecutionConfig.builder()
+                    .maxAttempts(maxAttempts)
+                    .initialBackoff(initialBackoff)
+                    .maxBackoff(maxBackoff)
+                    .retryOn(ExecutionConfig.RETRYABLE_ERRORS)
+                    .build();
+
+            builder.generateOptions(GenerateOptions.builder().executionConfig(retry)
+                    .build());
+        }
+        return builder.build();
     }
 
     private Toolkit connectMcpServers() {
@@ -237,15 +261,15 @@ public class AgentBuilderFactoryBean
         ToolsConfig toolsConfig = new ToolsConfig();
         toolsConfig.setDeny(List.of("wait_async_results"));
 
-        // AgentScope treats an empty allowlist as unrestricted. A no-MCP agent must expose no tools.
+        // AgentScope treats an empty allowlist as unrestricted.
         toolsConfig.setAllow(exposedTools.isEmpty() ? List.of("__react_agent_no_tools__") : List.copyOf(exposedTools));
-        AgentStateStore postgresStateStore =
-                postgresStateStores == null ? null : postgresStateStores.getIfAvailable();
+        AgentStateStore stateStore = stateStores == null ? null : stateStores.getIfAvailable();
+
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(agentName)
                 .agentId(agentName)
                 .model(model)
-                .stateStore(postgresStateStore == null ? new InMemoryAgentStateStore() : postgresStateStore)
+                .stateStore(stateStore == null ? new InMemoryAgentStateStore() : stateStore)
                 .toolkit(toolkit.copy())
                 .permissionContext(configurePermissions())
                 .toolsConfig(toolsConfig)
@@ -277,7 +301,7 @@ public class AgentBuilderFactoryBean
             if (service == null) {
                 throw new IllegalStateException("PromptService is unavailable; enable prompts and configure its JDBC, Redis and lakeFS dependencies");
             }
-            if (environment.getProperty("react-agent.prompts.sop-reference", Boolean.class, false)) {
+            if (environment.getProperty("react-agent.prompts.attach-reference-id", Boolean.class, false)) {
                 builder.sysPrompt(service.loadSystemPrompt(workflow, prompt, execution));
             } else {
                 builder.sysPrompt(service.latest(workflow, prompt).content());

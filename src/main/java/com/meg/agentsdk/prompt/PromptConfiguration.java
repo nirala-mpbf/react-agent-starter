@@ -7,13 +7,18 @@ import com.meg.agentsdk.prompt.lakefs.LakeFSService;
 import com.meg.agentsdk.prompt.lakefs.LakeFsClientConfig;
 import com.meg.agentsdk.prompt.repository.PromptVersionRepository;
 import io.lakefs.clients.sdk.ApiClient;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.*;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+import javax.sql.DataSource;
 
 import java.net.http.HttpClient;
 
@@ -29,8 +34,15 @@ public class PromptConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    PromptVersionRepository sdkPromptVersionRepository(JdbcTemplate jdbc) {
-        return new PromptVersionRepository(jdbc);
+    PromptVersionRepository sdkPromptVersionRepository(BeanFactory beans, Environment environment) {
+        String name = environment.getProperty("react-agent.prompts.datasource-bean", "").trim();
+        if (name.isEmpty()) {
+            return new PromptVersionRepository(beans.getBean(JdbcTemplate.class),
+                    beans.getBean(PlatformTransactionManager.class));
+        }
+        DataSource dataSource = beans.getBean(name, DataSource.class);
+        return new PromptVersionRepository(new JdbcTemplate(dataSource),
+                new DataSourceTransactionManager(dataSource));
     }
 
     @Bean

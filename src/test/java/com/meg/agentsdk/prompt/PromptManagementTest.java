@@ -68,9 +68,9 @@ class PromptManagementTest {
                 assertThat(context).hasNotFailed().hasSingleBean(GstAgent.class).hasSingleBean(DdAgent.class);
                 assertThat(context.getBeanNamesForType(HarnessAgent.Builder.class)).isEmpty();
                 PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
-                versions.markaActivation("prompts/gst/master.md", "c0");
+                versions.activateVersion("prompts/gst/master.md", "c0");
                 backend.prompts.put("dd0", "DD SOP");
-                versions.markaActivation("prompts/dd/master.md", "dd0");
+                versions.activateVersion("prompts/dd/master.md", "dd0");
                 GstAgent gst = context.getBean(GstAgent.class);
                 DdAgent dd = context.getBean(DdAgent.class);
                 savedAgent.set(gst);
@@ -243,7 +243,7 @@ class PromptManagementTest {
                     .withPropertyValues("react-agent.permissions.allow[0]=get_current_status").run(context -> {
                 assertThat(context).hasNotFailed();
                 PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
-                versions.markaActivation("prompts/ddod/master.md", "c0");
+                versions.activateVersion("prompts/ddod/master.md", "c0");
                 PromptedAgent agent = context.getBean(PromptedAgent.class);
                 assertThat(agent.ask("first").content()).isEqualTo("System SOP|first");
                 assertThat(backend.downloads.get()).isEqualTo(1);
@@ -266,13 +266,16 @@ class PromptManagementTest {
     @Test void activationRollsBackOnInsertFailureAndKeepsHistory() throws Exception {
         try (HttpBackend backend = new HttpBackend()) {
             DataSource ds = database();
-            enabled(backend, ds, redis(new ConcurrentHashMap<>())).withUserConfiguration(CoreAgent.class).run(context -> {
+            enabled(backend, mock(DataSource.class), redis(new ConcurrentHashMap<>()))
+                    .withBean("promptMetadataDataSource", DataSource.class, () -> ds)
+                    .withPropertyValues("react-agent.prompts.datasource-bean=promptMetadataDataSource")
+                    .withUserConfiguration(CoreAgent.class).run(context -> {
                 PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
-                versions.markaActivation("prompts/ddod/master.md", "c0");
-                assertThatThrownBy(() -> versions.markaActivation("prompts/ddod/master.md", null))
+                versions.activateVersion("prompts/ddod/master.md", "c0");
+                assertThatThrownBy(() -> versions.activateVersion("prompts/ddod/master.md", null))
                         .isInstanceOf(org.springframework.dao.DataAccessException.class);
                 assertThat(versions.getActiveCommitId("prompts/ddod/master.md")).isEqualTo("c0");
-                versions.markaActivation("prompts/ddod/master.md", "c1");
+                versions.activateVersion("prompts/ddod/master.md", "c1");
                 JdbcTemplate jdbc = new JdbcTemplate(ds);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM prompt_versions", Integer.class)).isEqualTo(2);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM prompt_versions WHERE is_active=TRUE", Integer.class)).isEqualTo(1);
@@ -287,9 +290,9 @@ class PromptManagementTest {
             when(redis.opsForValue()).thenThrow(new DataAccessResourceFailureException("Redis offline"));
             enabled(backend, ds, redis).withUserConfiguration(CoreAgent.class).run(context -> {
                 PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
-                versions.markaActivation("prompts/ddod/master.md", "c0");
+                versions.activateVersion("prompts/ddod/master.md", "c0");
                 assertThat(context.getBean(PromptService.class).latest("ddod", "master").content()).isEqualTo("System SOP");
-                versions.markaActivation("prompts/ddod/master.md", "missing");
+                versions.activateVersion("prompts/ddod/master.md", "missing");
                 assertThatThrownBy(() -> context.getBean(PromptService.class).latest("ddod", "master"))
                         .isInstanceOf(LakefsException.class);
             });
@@ -305,7 +308,7 @@ class PromptManagementTest {
             web(backend, ds, redis(new ConcurrentHashMap<>())).withPropertyValues("react-agent.prompts.controller-enabled=true")
                     .run(context -> {
                         assertThat(context).hasNotFailed().hasSingleBean(PromptController.class);
-                        context.getBean(PromptVersionRepository.class).markaActivation("prompts/ddod/master.md", "c0");
+                        context.getBean(PromptVersionRepository.class).activateVersion("prompts/ddod/master.md", "c0");
                         MockMvcBuilders.webAppContextSetup(context).build()
                                 .perform(post("/api/v1/prompts").header("X-Action", "latest").contentType("application/json")
                                         .content("{\"workflow\":\"ddod\",\"kind\":\"master\"}"))

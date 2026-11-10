@@ -1,12 +1,43 @@
 # MERGE into the existing application's application.yml.
-# Keep its existing database, Redis, lakeFS, prompt, and gateway settings.
+# This example uses two databases on one PostgreSQL server. Keep your Redis and lakeFS settings.
 agent:
+  model: ${AGENT_MODEL}
   gateway:
-    mcp-url: ${AGENT_GATEWAY_MCP_URL:http://localhost:4000/mcp}
+    base-url: ${AGENT_GATEWAY_BASE_URL}
+    api-key: ${AGENT_GATEWAY_API_KEY}
+    mcp-url: ${AGENT_GATEWAY_MCP_URL:http://127.0.0.1:8082/mcp}
+
+# Copy DataSourceConfiguration.java into the host application's config package.
+app:
+  datasource:
+    host: ${APP_DB_HOST:localhost}
+    port: ${APP_DB_PORT:5433}
+    prompt:
+      jdbc-url: jdbc:postgresql://${app.datasource.host}:${app.datasource.port}/${PROMPT_DB_NAME:prompt_metadata}
+      username: ${PROMPT_DB_USERNAME:${DB_USERNAME}}
+      password: ${PROMPT_DB_PASSWORD:${DB_PASSWORD}}
+    memory:
+      jdbc-url: jdbc:postgresql://${app.datasource.host}:${app.datasource.port}/${MEMORY_DB_NAME:agent_memory}
+      username: ${MEMORY_DB_USERNAME:${DB_USERNAME}}
+      password: ${MEMORY_DB_PASSWORD:${DB_PASSWORD}}
+
+lakefs:
+  path:
+    workflow: ${LAKEFS_PATH_WORKFLOW:ddod}
+    prompt: ${LAKEFS_PATH_PROMPT:onboarding_master_sop_7}
 
 react-agent:
+  model:
+    retry:
+      max-attempts: 3
+      initial-backoff: 500ms
+      max-backoff: 2s
+  memory:
+    postgres-enabled: true
+    datasource-bean: agentMemoryDataSource
   prompts:
-    sop-reference: true
+    datasource-bean: promptMetadataDataSource
+    attach-reference-id: true
     enabled: true
     controller-enabled: true # Enable only when the host protects the prompt administration endpoints.
   mcp:
@@ -22,5 +53,6 @@ spring:
   flyway:
     locations: classpath:db/migration,classpath:db/react-agent-sdk
 
-# Keep the existing spring.datasource.*, spring.data.redis.*, lakefs.* and prompt.cache.ttl properties.
-# Required lakefs properties: endpoint, access-key, secret-key, repository, branch.
+# Keep existing spring.data.redis.*, lakefs.* and prompt.cache.ttl settings.
+# Required lakeFS settings: endpoint, access-key, secret-key, repository, branch.
+# Create both databases first. Apply the prompt metadata migration to the prompt database.

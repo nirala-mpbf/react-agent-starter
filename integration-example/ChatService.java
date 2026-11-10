@@ -16,10 +16,13 @@ public class ChatService {
     }
 
     public Mono<ChatResponse> chat(ChatRequest request) {
-        RuntimeContext context = RuntimeContext.builder()
+        RuntimeContext.Builder contextBuilder = RuntimeContext.builder()
                 .userId(request.userId())
-                .sessionId(request.sessionId())
-                .build();
+                .sessionId(request.sessionId());
+        if (request.referenceId() != null) {
+            contextBuilder.put("referenceId", request.referenceId());
+        }
+        RuntimeContext context = contextBuilder.build();
         return agent.askAsync(request.message(), context)
                 .map(reply -> new ChatResponse(request.sessionId(), reply.content()));
     }

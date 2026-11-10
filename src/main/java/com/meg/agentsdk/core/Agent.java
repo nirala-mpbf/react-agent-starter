@@ -1,7 +1,7 @@
 package com.meg.agentsdk.core;
 
 import com.meg.agentsdk.annotation.ReactAgentRouter;
-import com.meg.agentsdk.config.AgentBuilderFactoryBean;
+import com.meg.agentsdk.config.AgentBuilderFactory;
 import com.meg.agentsdk.prompt.PromptService;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.UserMessage;
@@ -26,11 +26,11 @@ import java.util.UUID;
  * A Spring-managed configuration. Each execution owns a fresh HarnessAgent.
  */
 public abstract class Agent implements InitializingBean, DisposableBean {
-    private AgentBuilderFactoryBean factory;
+    private AgentBuilderFactory factory;
 
     @Autowired
     final void configure(Environment environment, ObjectProvider<PromptService> prompts,
-                         @Qualifier("reactAgentPostgresStateStore") ObjectProvider<AgentStateStore> postgresStateStores) {
+                         @Qualifier("reactAgentStateStore") ObjectProvider<AgentStateStore> stateStores) {
 
         ReactAgentRouter annotationDetails = AnnotatedElementUtils.findMergedAnnotation(ClassUtils.getUserClass(this), ReactAgentRouter.class);
 
@@ -43,11 +43,11 @@ public abstract class Agent implements InitializingBean, DisposableBean {
             throw new IllegalArgumentException("Agent name must not be blank");
         }
 
-        factory = new AgentBuilderFactoryBean(
+        factory = new AgentBuilderFactory(
                     name,
                     annotationDetails.model(),
                     Arrays.stream(annotationDetails.mcp())
-                        .map(server -> new AgentBuilderFactoryBean.Endpoint(server.name(), server.url()))
+                        .map(server -> new AgentBuilderFactory.Endpoint(server.name(), server.url()))
                         .toList(),
                     List.of(annotationDetails.allowedTools()),
                     environment
@@ -56,7 +56,7 @@ public abstract class Agent implements InitializingBean, DisposableBean {
         factory.setWorkflow(annotationDetails.workflow());
         factory.setPrompt(annotationDetails.prompt());
         factory.setPromptServices(prompts);
-        factory.setPostgresStateStores(postgresStateStores);
+        factory.setStateStores(stateStores);
     }
 
     @Override

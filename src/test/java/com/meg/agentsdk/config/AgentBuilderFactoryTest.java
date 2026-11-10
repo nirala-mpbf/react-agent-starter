@@ -20,7 +20,7 @@ import java.util.*;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-class AgentBuilderFactoryBeanTest {
+class AgentBuilderFactoryTest {
     private MockEnvironment environment() {
         return new MockEnvironment().withProperty("agent.model", "test-model")
                 .withProperty("agent.gateway.base-url", "http://localhost:1/v1")
@@ -41,23 +41,23 @@ class AgentBuilderFactoryBeanTest {
         return client;
     }
 
-    private AgentBuilderFactoryBean factory(List<AgentBuilderFactoryBean.Endpoint> endpoints,
+    private AgentBuilderFactory factory(List<AgentBuilderFactory.Endpoint> endpoints,
             List<String> tools, MockEnvironment env, McpClientWrapper... clients) {
         ArrayDeque<McpClientWrapper> queue = new ArrayDeque<>(List.of(clients));
-        return new AgentBuilderFactoryBean("test", "", endpoints, tools, env) {
+        return new AgentBuilderFactory("test", "", endpoints, tools, env) {
             @Override protected McpClientWrapper getMcpClientWrapper(Endpoint endpoint, Duration timeout) {
                 return queue.removeFirst();
             }
         };
     }
 
-    private AgentBuilderFactoryBean.Endpoint endpoint(String name) {
-        return new AgentBuilderFactoryBean.Endpoint(name, "http://localhost:1/mcp");
+    private AgentBuilderFactory.Endpoint endpoint(String name) {
+        return new AgentBuilderFactory.Endpoint(name, "http://localhost:1/mcp");
     }
 
     @Test void preservesAdvertisedNamesAndFiltersOnlyRequestedTools() throws Exception {
         McpClientWrapper client = client("brain", "get_current_status", "verify_otp");
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of("get_current_status"), environment(), client);
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of("get_current_status"), environment(), client);
         factory.afterPropertiesSet();
         try {
             try (HarnessAgent agent = factory.buildWithPrompt(null, null).sysPrompt("one").build()) {
@@ -76,7 +76,7 @@ class AgentBuilderFactoryBeanTest {
 
     @Test void omittedFilterExposesAllMcpToolsWithoutAddingApprovals() throws Exception {
         McpClientWrapper client = client("brain", "get_current_status", "verify_otp");
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(), environment(), client);
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of(), environment(), client);
         factory.afterPropertiesSet();
         try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("get_current_status", "verify_otp");
@@ -85,7 +85,7 @@ class AgentBuilderFactoryBeanTest {
     }
 
     @Test void noMcpMeansNoToolsIncludingBuiltInTools() {
-        AgentBuilderFactoryBean factory = factory(List.of(), List.of(), environment());
+        AgentBuilderFactory factory = factory(List.of(), List.of(), environment());
         factory.afterPropertiesSet();
         try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
             assertThat(agent.getToolkit().getToolNames()).isEmpty();
@@ -94,7 +94,7 @@ class AgentBuilderFactoryBeanTest {
 
     @Test void executionApprovalsAreExplicitAndIndependent() throws Exception {
         MockEnvironment env = environment().withProperty("react-agent.permissions.allow[0]", "verify_otp");
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(), env,
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of(), env,
                 client("brain", "verify_otp", "get_current_status"));
         factory.afterPropertiesSet();
         try {
@@ -107,7 +107,7 @@ class AgentBuilderFactoryBeanTest {
 
     @Test void invalidVisibilityClosesConnectionsDuringFailedStartup() throws Exception {
         McpClientWrapper client = client("brain", "get_current_status");
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of("not_discovered"), environment(), client);
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of("not_discovered"), environment(), client);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("undiscovered");
         verify(client).close();
     }
@@ -115,7 +115,7 @@ class AgentBuilderFactoryBeanTest {
     @Test void invalidApprovalClosesConnectionsDuringFailedStartup() throws Exception {
         McpClientWrapper client = client("brain", "get_current_status");
         MockEnvironment env = environment().withProperty("react-agent.permissions.allow[0]", "not_discovered");
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(), env, client);
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of(), env, client);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("unavailable");
         verify(client).close();
     }
@@ -123,7 +123,7 @@ class AgentBuilderFactoryBeanTest {
     @Test void supportsMultipleServersWithDistinctActualToolNames() throws Exception {
         McpClientWrapper brain = client("brain", "get_current_status");
         McpClientWrapper lentra = client("lentra", "submit_profile");
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")),
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain"), endpoint("lentra")),
                 List.of("get_current_status", "submit_profile"), environment(), brain, lentra);
         factory.afterPropertiesSet();
         try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
@@ -136,7 +136,7 @@ class AgentBuilderFactoryBeanTest {
     @Test void rejectsDuplicateToolNamesAndClosesEveryOpenedClient() throws Exception {
         McpClientWrapper first = client("brain", "status");
         McpClientWrapper second = client("lentra", "status");
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("Duplicate MCP tool name");
         verify(first).close();
         verify(second).close();
@@ -146,7 +146,7 @@ class AgentBuilderFactoryBeanTest {
         McpClientWrapper first = client("brain", "status");
         McpClientWrapper second = client("lentra", "submit");
         when(second.listTools()).thenReturn(Mono.error(new IllegalStateException("server disconnected")));
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
         assertThatThrownBy(factory::afterPropertiesSet).hasMessageContaining("server disconnected");
         verify(first).close();
         verify(second).close();
@@ -156,7 +156,7 @@ class AgentBuilderFactoryBeanTest {
         McpClientWrapper first = client("brain", "status");
         McpClientWrapper second = client("lentra", "submit");
         doThrow(new IllegalStateException("close failed")).when(first).close();
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain"), endpoint("lentra")), List.of(), environment(), first, second);
         factory.afterPropertiesSet();
         factory.destroy();
         verify(first).close();
@@ -166,7 +166,7 @@ class AgentBuilderFactoryBeanTest {
     @Test void validatesEndpointsAndTimeoutBeforeConnecting() {
         assertThatThrownBy(() -> factory(List.of(endpoint("same"), endpoint("same")),
                 List.of(), environment()).afterPropertiesSet()).hasMessageContaining("Duplicate MCP server");
-        assertThatThrownBy(() -> factory(List.of(new AgentBuilderFactoryBean.Endpoint("brain", "file:/bad")),
+        assertThatThrownBy(() -> factory(List.of(new AgentBuilderFactory.Endpoint("brain", "file:/bad")),
                 List.of(), environment()).afterPropertiesSet()).hasMessageContaining("HTTP(S)");
         assertThatThrownBy(() -> factory(List.of(), List.of(),
                 environment().withProperty("react-agent.mcp.timeout", "0s")).afterPropertiesSet())
@@ -181,6 +181,7 @@ class AgentBuilderFactoryBeanTest {
     @Test void realHttpMcpToolCallWorksAcrossFreshAgents() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         AtomicInteger toolCalls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger transientFailures = new AtomicInteger();
         AtomicInteger modelCalls = new java.util.concurrent.atomic.AtomicInteger();
         CopyOnWriteArrayList<String> requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
         HttpServer server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
@@ -211,6 +212,11 @@ class AgentBuilderFactoryBeanTest {
         });
         server.createContext("/v1", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            if (modelCalls.get() == 1 && transientFailures.compareAndSet(0, 1)) {
+                exchange.sendResponseHeaders(503, -1);
+                exchange.close();
+                return;
+            }
             requests.add(body);
             int count = modelCalls.incrementAndGet();
             boolean callTool = count % 2 == 1;
@@ -234,7 +240,10 @@ class AgentBuilderFactoryBeanTest {
                     .withUserConfiguration(LiveConfiguration.class)
                     .withPropertyValues("agent.model=test-model", "agent.gateway.api-key=test",
                             "agent.gateway.base-url=" + base + "/v1", "test.mcp-url=" + base + "/mcp",
-                            "react-agent.permissions.allow[0]=get_current_status", "react-agent.mcp.timeout=5s")
+                            "react-agent.permissions.allow[0]=get_current_status", "react-agent.mcp.timeout=5s",
+                            "react-agent.model.retry.max-attempts=2",
+                            "react-agent.model.retry.initial-backoff=10ms",
+                            "react-agent.model.retry.max-backoff=20ms")
                     .run(context -> {
                         assertThat(context).hasNotFailed();
                         LiveConfiguration agent = context.getBean(LiveConfiguration.class);
@@ -245,6 +254,7 @@ class AgentBuilderFactoryBeanTest {
                                     .block(Duration.ofSeconds(15)).content()).contains("OTP_PENDING");
                         }
                     });
+            assertThat(transientFailures.get()).isEqualTo(1);
             assertThat(toolCalls.get()).isEqualTo(2);
             assertThat(modelCalls.get()).isEqualTo(4);
             assertThat(requests.get(1)).contains("OTP_PENDING");
@@ -257,7 +267,7 @@ class AgentBuilderFactoryBeanTest {
     @Test void discoveryTimeoutClosesTheConnection() throws Exception {
         McpClientWrapper client = client("brain", "status");
         when(client.listTools()).thenReturn(Mono.never());
-        AgentBuilderFactoryBean factory = factory(List.of(endpoint("brain")), List.of(),
+        AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of(),
                 environment().withProperty("react-agent.mcp.timeout", "20ms"), client);
         assertThatThrownBy(factory::afterPropertiesSet).isInstanceOf(IllegalStateException.class);
         verify(client).close();

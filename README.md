@@ -8,7 +8,7 @@ Java **25**, Spring Boot **4.1.1**, AgentScope **2.0.3**, lakeFS SDK **1.84.0** 
 
 1. Use JDK 25. Run mvn clean install from the SDK checkout on the machine building the AI service, or resolve the published artifact from your team's Maven repository.
 2. Add com.meg:react-agent-spring-sdk:0.1.0-SNAPSHOT to the AI service POM. Align any directly declared AgentScope dependencies to 2.0.3 and reload Maven in IntelliJ.
-3. Declare the typed agent as shown below. Inject it into ChatService in place of the old manual builder. Pass userId, sessionId, and optional referenceId in RuntimeContext to askAsync. With SOP reference handling enabled, the request reference takes priority and the SOP reference is the fallback.
+3. Declare the typed agent as shown below. Inject it into ChatService in place of the old manual builder. Pass userId, sessionId, and optional referenceId in RuntimeContext to askAsync. With attach-reference-id enabled, the request reference takes priority and the SOP reference is the fallback.
 4. Start Brain and MCP. Configure the model gateway and MCP URL and confirm MCP advertises processWorkflowCommand. For managed prompts, configure lakeFS, Redis, and the app PostgreSQL database. Verify the selected SOP has an active prompt version and merge the SDK Flyway location if using Flyway.
 5. To enable PostgreSQL conversation memory, merge the following into the AI service's existing react-agent configuration.
 
@@ -20,6 +20,30 @@ Java **25**, Spring Boot **4.1.1**, AgentScope **2.0.3**, lakeFS SDK **1.84.0** 
 
    The store uses the AI service's Spring DataSource. AgentScope initializes agentscope.agentscope_sessions using that database user, which needs the required schema and table access.
 6. Run mvn clean verify for the AI service. Start it and send a status question to POST /api/v1/chat with a known referenceId. Confirm Brain receives GET_STATE. For memory, send a distinctive phrase, restart the service, and ask for the phrase using the same userId and sessionId. Check the session row in agentscope.agentscope_sessions and repeat the recall request with a different session to check isolation.
+
+## Model retries and datasource selection
+
+Set these properties in the consuming application:
+
+```yaml
+react-agent:
+  model:
+    retry:
+      max-attempts: 3
+      initial-backoff: 500ms
+      max-backoff: 2s
+  prompts:
+    datasource-bean: promptMetadataDataSource
+  memory:
+    postgres-enabled: true
+    datasource-bean: agentMemoryDataSource
+```
+
+The retry limit includes the initial model attempt. AgentScope retries transient model errors without replaying the agent run. Omit the retry settings to keep AgentScope's defaults.
+
+The integration example contains the Java configuration that registers both DataSource beans and the YAML that binds their connection settings. Both pools share APP_DB_HOST and APP_DB_PORT. PROMPT_DB_NAME defaults to prompt_metadata and MEMORY_DB_NAME defaults to agent_memory. Create both databases before starting the host. Apply the prompt migration to the prompt database and grant the memory database user permission to initialize the AgentScope schema. Markdown still uses the lakeFS HTTP configuration.
+
+For a single database, use the host's spring.datasource configuration, omit the example's DataSourceConfiguration and app.datasource block, and omit both datasource-bean selectors.
 
 ## Declare an agent
 
@@ -51,7 +75,7 @@ Supply both workflow and prompt, or omit both. `prompt` is a kind such as `onboa
 
 Put the annotated Agent subclass under the application component-scan package (or explicitly import it). The annotation makes it a component and imports prompt configuration; do not scan SDK packages. Keep the main application class separate. Each typed agent owns its existing factory internally, without publishing a HarnessAgent.Builder bean.
 
-The Brain example exposes one tool, `processWorkflowCommand`; CREATE, GET_STATE and SUBMIT_EVENT are argument values, not separate tools. The SDK uses the schema advertised by MCP and does not hardcode a request-body wrapper. With react-agent.prompts.sop-reference=true, the SDK loads the SOP selected by the annotation and prepares the effective prompt. ChatService passes the message and context to askAsync.
+The Brain example exposes one tool, `processWorkflowCommand`; CREATE, GET_STATE and SUBMIT_EVENT are argument values, not separate tools. The SDK uses the schema advertised by MCP and does not hardcode a request-body wrapper. With react-agent.prompts.attach-reference-id=true, the SDK loads the SOP selected by the annotation and prepares the effective prompt. ChatService passes the message and context to askAsync.
 
 ## Enable the optional prompt feature
 
@@ -59,6 +83,7 @@ The Brain example exposes one tool, `processWorkflowCommand`; CREATE, GET_STATE 
 react-agent:
   prompts:
     enabled: true
+    attach-reference-id: true
     controller-enabled: false  # Explicitly set true to expose the prompt API.
   mcp:
     timeout: 30s
@@ -99,11 +124,11 @@ spring:
     locations: classpath:db/migration,classpath:db/react-agent-sdk
 ```
 
-Both feature flags default to false. With prompts disabled and no workflow/prompt selection, the original model/MCP-only usage works without storage configuration. The controller is registered only in a servlet application with both flags enabled.
+The prompt feature, prompt controller, and reference ID attachment are disabled by default. With prompts disabled and no workflow/prompt selection, the original model/MCP-only usage works without storage configuration. The controller is registered only in a servlet application with both flags enabled.
 
 ### Dependencies
 
-Prompt dependencies are marked optional in the SDK POM, so adding the core SDK alone does not force a datasource/server into an application. To enable prompts, the consuming application needs the lakeFS SDK 1.84.0, Boot JDBC, Redis, validation and MVC dependencies, a PostgreSQL driver, and Flyway/PostgreSQL migration support. **The colleague's AI service already declares these dependencies at the matching versions.**
+Prompt dependencies are marked optional in the SDK POM, so adding the core SDK alone does not force a datasource/server into an application. To enable prompts, the consuming application needs the lakeFS SDK 1.84.0, Boot JDBC, Redis, validation and MVC dependencies, a PostgreSQL driver, and the prompt metadata schema. If the host runs Flyway, it also needs the Flyway starter and PostgreSQL migration support.
 
 The host's Boot JDBC configuration supplies JdbcTemplate and a transaction manager. If configuring Spring manually, supply those beans yourself. Default SDK prompt beans back off when the application supplies a bean of the corresponding SDK type.
 
@@ -180,7 +205,8 @@ com.meg.agentsdk/
 │   ├── Agent.java
 │   └── AgentResponse.java
 ├── config/
-│   └── AgentBuilderFactoryBean.java
+│   ├── AgentBuilderFactory.java
+│   └── MemoryConfiguration.java
 └── prompt/
     ├── PromptConfiguration.java
     ├── PromptService.java
@@ -199,14 +225,14 @@ com.meg.agentsdk/
     └── exception/LakefsException.java
 ```
 
-The existing four core classes remain. AgentBuilderFactoryBean depends on PromptService, not on the lakeFS/cache/repository implementation details.
+The existing four core classes remain. AgentBuilderFactory depends on PromptService, not on the lakeFS/cache/repository implementation details.
 
 ## Integrate into the existing AI service
 
 1. Build/install the SDK; add `com.meg:react-agent-spring-sdk:0.1.0-SNAPSHOT`.
 2. Remove the old AgentConfig/annotation on the application class and add integration-example/GstOdAgent.java under the application scan package. Keep the main application class as in integration-example/AiOrchestrationApplication.java.
 3. Enable prompt services and, if wanted, the controller. Merge integration-example/application-additions.yml into the existing YAML; do not create duplicate top-level keys.
-4. Keep existing datasource/Redis/lakeFS settings and merge the SDK Flyway location.
+4. For the two database example, copy integration-example/DataSourceConfiguration.java and configure the connection settings in the host YAML. Keep Redis and lakeFS settings. If using Flyway, merge the SDK migration location and run it against the prompt database.
 5. Remove the old prompt service/cache/repository/client-configuration/controller/DTO classes that have moved to the SDK. Do not keep duplicate prompt routes.
 6. Update application imports from com.example.ai prompt types to the corresponding com.meg.agentsdk.prompt types. An application-specific global exception handler can stay, but update its LakefsException import if it uses the moved exception.
 7. Replace ChatService using the example: inject GstOdAgent, call askAsync with request context, and map the SDK response.
@@ -218,7 +244,7 @@ Tests and integration examples are not packaged into the SDK JAR. The SDK has no
 
 Tool visibility and execution permissions remain separate. Unknown names/approvals and duplicate MCP tool/server names are rejected. MCP tool names are used exactly as advertised, without invented prefixes. Unapproved tools retain AgentScope's standard behavior; this API does not implement confirmation/resume.
 
-Fresh builders use independent in-memory state. Passing the same session ID does not persist conversation history. Workspace, filesystem/shell tools, memory hooks, dynamic skills, and agent tracing remain disabled by default.
+Without a configured state store, each request uses fresh in-memory state. With PostgreSQL memory enabled, the same userId and sessionId resume saved conversation state. Workspace, filesystem/shell tools, memory hooks, dynamic skills, and agent tracing remain disabled by default.
 
 The original global `react-agent.permissions.allow` remains the fallback. For agents with different visible tools, provide per-agent approval lists; each replaces the global list for that agent and is validated against that agent's visible tools:
 
@@ -242,7 +268,3 @@ The keys match annotation `name` values. This example approves the whole `proces
 Tests cover two component-scanned typed agents with separate prompts/tools and approval lists, sync/async calls, concurrent requests, shutdown rejection, prompt refresh, and original core behavior, optional dependency/feature gating, paired prompt selection, custom prompt beans, transactional activation, Redis fallback/eviction, real local model/MCP/lakeFS HTTP calls, prompt refresh, upload/latest endpoints, and scoped exception handling.
 
 Default JDBC tests use H2. An additional run uses disposable PostgreSQL with the actual migration/index. Real Redis behavior is represented by test doubles; no existing business infrastructure is called.
-
-
-
-
