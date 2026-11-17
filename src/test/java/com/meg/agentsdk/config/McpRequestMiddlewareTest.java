@@ -9,20 +9,18 @@ import static org.assertj.core.api.Assertions.*;
 class McpRequestMiddlewareTest {
 
     private final McpRequestMiddleware middleware =
-            new McpRequestMiddleware(null);
+            new McpRequestMiddleware();
 
     @Test
     void shouldIncludeReferenceIdInSystemPrompt() {
 
-        RuntimeContext context =
-                RuntimeContext.builder().build();
-
-        context.put("referenceId", "OTP-05");
-
-        context.put(
-                McpRequestMiddleware.REQUEST_SOP,
-                "Use registered MCP tools to check status."
-        );
+        RuntimeContext context = RuntimeContext.builder()
+                .put("referenceId", "OTP-05")
+                .put(
+                        McpRequestMiddleware.REQUEST_SOP,
+                        "Use registered MCP tools to check status."
+                )
+                .build();
 
         String prompt = middleware.onSystemPrompt(
                 null,
@@ -40,13 +38,12 @@ class McpRequestMiddlewareTest {
     @Test
     void shouldRejectMissingReferenceId() {
 
-        RuntimeContext context =
-                RuntimeContext.builder().build();
-
-        context.put(
-                McpRequestMiddleware.REQUEST_SOP,
-                "Example SOP"
-        );
+        RuntimeContext context = RuntimeContext.builder()
+                .put(
+                        McpRequestMiddleware.REQUEST_SOP,
+                        "Example SOP"
+                )
+                .build();
 
         assertThatThrownBy(() ->
                 middleware.onSystemPrompt(
@@ -54,8 +51,38 @@ class McpRequestMiddlewareTest {
                         context,
                         "Base prompt"
                 ).block()
-        ).hasMessageContaining(
-                "referenceId is required"
-        );
+        ).hasMessageContaining("referenceId is required");
+    }
+
+    @Test
+    void shouldKeepReferenceIdsSeparateAcrossRequests() {
+
+        RuntimeContext firstContext = RuntimeContext.builder()
+                .put("referenceId", "OTP-01")
+                .put(McpRequestMiddleware.REQUEST_SOP, "First SOP")
+                .build();
+
+        RuntimeContext secondContext = RuntimeContext.builder()
+                .put("referenceId", "OTP-02")
+                .put(McpRequestMiddleware.REQUEST_SOP, "Second SOP")
+                .build();
+
+        String firstPrompt = middleware.onSystemPrompt(
+                null, firstContext, "Base prompt"
+        ).block();
+
+        String secondPrompt = middleware.onSystemPrompt(
+                null, secondContext, "Base prompt"
+        ).block();
+
+        assertThat(firstPrompt)
+                .contains("OTP-01")
+                .contains("First SOP")
+                .doesNotContain("OTP-02", "Second SOP");
+
+        assertThat(secondPrompt)
+                .contains("OTP-02")
+                .contains("Second SOP")
+                .doesNotContain("OTP-01", "First SOP");
     }
 }

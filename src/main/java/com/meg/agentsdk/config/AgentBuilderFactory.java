@@ -330,7 +330,7 @@ public class AgentBuilderFactory implements InitializingBean, DisposableBean {
         HarnessAgent.Builder builder = createHarnessAgentBuilder(
                 stateStore == null ? new NonPersistentAgentStateStore() : stateStore);
 
-        builder.middleware(new McpRequestMiddleware(toolkit));
+        builder.middleware(new McpRequestMiddleware());
         return builder.build();
     }
 
