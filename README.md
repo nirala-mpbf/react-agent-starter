@@ -48,7 +48,7 @@ For a single database, use the host's spring.datasource configuration, omit the 
 ## Declare an agent
 
 ```java
-@ReactAgentRouter(
+@ReActAgent(
     name = "gst-od-assistant",
     model = "${agent.model}",
     mcp = {@McpServer(name = "brain-tools", url = "${agent.gateway.mcp-url}")},
@@ -59,7 +59,7 @@ For a single database, use the host's spring.datasource configuration, omit the 
 public class GstOdAgent extends Agent {}
 ```
 
-Imports are `com.meg.agentsdk.annotation.ReactAgentRouter`, `McpServer`, and `com.meg.agentsdk.core.Agent`.
+Imports are `com.meg.agentsdk.annotation.ReActAgent`, `McpServer`, and `com.meg.agentsdk.core.Agent`.
 
 | Attribute | Purpose | Default |
 |---|---|---|
@@ -143,10 +143,6 @@ Like the original service, one prompt metadata database represents the configure
 ## Typed agent and ChatService flow
 
 ```java
-// Synchronous caller:
-AgentResponse response = gstOdAgent.ask("What is my status?");
-String text = response.content();
-
 // Reactive caller, preserving request context:
 return gstOdAgent.askAsync(request.message(), context)
     .map(reply -> new ChatResponse(request.sessionId(), reply.content()));
@@ -156,14 +152,14 @@ Inject GstOdAgent directly through the service constructor. See integration-exam
 
 ```text
 ChatService -> gstOdAgent.askAsync(query, context)
-            -> internal factory creates a fresh builder
+            -> internal factory gets or builds the shared HarnessAgent
             -> PromptService.latest(workflow, prompt): Redis first, then DB/lakeFS
-            -> attach system prompt, build, call, map AgentResponse, close
+            -> attach request prompt, call agent, map AgentResponse
 ```
 
-The agent bean is shared; each execution gets independent request state and a fresh builder. Model/MCP resources are prepared once per typed agent and closed on Spring shutdown. Mono.using closes each request agent on completion, failure, or cancellation. Prompt lookup runs for each execution/subscription and is scheduled on boundedElastic because storage calls block. A Mono is lazy: calling askAsync without subscribing does not execute a request.
+Each typed Spring bean builds one HarnessAgent on its first request. Spring shutdown closes the agent and its MCP connections. Prompt lookup and the RuntimeContext remain per request. The lookup runs on boundedElastic because storage calls block. Without PostgreSQL memory, AgentScope starts each call with fresh history, including when the same session ID is reused.
 
-ask is blocking; use askAsync in reactive services. Calling ask on Reactor nonblocking threads fails before starting work. Without an explicit RuntimeContext, each execution receives a fresh session ID. Enable PostgreSQL memory and pass stable user and session IDs through RuntimeContext to continue a conversation across requests. Object[] parameters have not been added because their meaning has not been defined; use the typed RuntimeContext overload for user/session information.
+Pass a fresh RuntimeContext per call. Keep userId and sessionId stable when PostgreSQL memory is enabled and you want to continue a conversation.
 
 ## Reused prompt behavior
 
@@ -199,7 +195,7 @@ The SDK's PromptExceptionHandler applies only to PromptController. It does not i
 ```text
 com.meg.agentsdk/
 ├── annotation/
-│   ├── ReactAgentRouter.java
+│   ├── ReActAgent.java
 │   └── McpServer.java
 ├── core/
 │   ├── Agent.java

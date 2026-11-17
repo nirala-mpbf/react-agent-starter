@@ -1,6 +1,6 @@
 package com.meg.agentsdk.config;
 
-import com.meg.agentsdk.annotation.ReactAgentRouter;
+import com.meg.agentsdk.annotation.ReActAgent;
 import com.meg.agentsdk.core.Agent;
 import io.agentscope.harness.agent.HarnessAgent;
 import org.junit.jupiter.api.Test;
@@ -9,10 +9,10 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ReactAgentRegistrationTest {
-    @ReactAgentRouter(name = "${app.agent-name}", model = "${app.model}")
+    @ReActAgent(name = "${app.agent-name}", model = "${app.model}")
     static class FirstAgent extends Agent {}
 
-    @ReactAgentRouter(name = "other")
+    @ReActAgent(name = "other")
     static class OtherAgent extends Agent {}
 
     @Test

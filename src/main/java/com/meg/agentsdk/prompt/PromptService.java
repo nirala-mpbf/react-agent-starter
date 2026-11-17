@@ -17,7 +17,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Pattern;
-import io.agentscope.core.agent.RuntimeContext;
 
 public class PromptService {
 
@@ -112,48 +111,6 @@ public class PromptService {
             throw new LakefsException(HttpStatus.BAD_REQUEST, "Invalid workflow or prompt name");
         }
         return "prompts/" + workflow + "/" + kind + ".md";
-    }
-
-    private static final java.util.regex.Pattern REFERENCE_ID_PATTERN =
-            java.util.regex.Pattern.compile(
-                    "(?im)^\\s*(?:TRUSTED_REFERENCE_ID|referenceId)\\s*:\\s*[\"']?([^\\s\"'`]+)"
-            );
-    public String loadSystemPrompt(String workflow, String promptName) {
-        return loadSystemPrompt(workflow, promptName, null);
-    }
-
-    public String loadSystemPrompt(String workflow, String promptName, RuntimeContext context) {
-        PromptResponse response = latest(workflow, promptName);
-        if (response == null || response.content() == null || response.content().isBlank()) {
-            throw new IllegalStateException("Onboarding system prompt is empty");
-        }
-        String sop = response.content();
-        String referenceId = context == null ? null : context.get("referenceId", String.class);
-        java.util.regex.Matcher matcher = REFERENCE_ID_PATTERN.matcher(sop);
-        if (referenceId == null || referenceId.isBlank()) {
-            if (!matcher.find()) {
-                throw new IllegalStateException("Reference ID missing from loaded onboarding SOP");
-            }
-            referenceId = matcher.group(1).trim();
-        }
-        if (referenceId.length() > 100) {
-            throw new IllegalArgumentException("referenceId must not exceed 100 characters");
-        }
-        sop = REFERENCE_ID_PATTERN.matcher(sop).replaceAll("").stripTrailing();
-        String trustedContext = """
-
-                    TRUSTED RUNTIME CONTEXT:
-                    referenceId = %s
-
-                    For workflow requests, use processWorkflowCommand and follow its registered schema.
-                    Use GET_STATE for status, CREATE for a new workflow, and SUBMIT_EVENT only for
-                    an externally completed business action. Use this exact referenceId in metadata.
-                    Let the registered tool schema provide the body, metadata, requestId, operation,
-                    event, idempotencyKey, workflowKey, and empty payload fields.
-                    Do not copy reference IDs from examples, invent values, or create a workflow
-                    merely because a lookup fails.
-                    """.formatted(referenceId);
-        return sop + "\n\n" + trustedContext;
     }
 
 }

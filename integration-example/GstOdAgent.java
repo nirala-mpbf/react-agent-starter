@@ -1,10 +1,10 @@
 package com.example.ai.agent;
 
 import com.meg.agentsdk.annotation.McpServer;
-import com.meg.agentsdk.annotation.ReactAgentRouter;
+import com.meg.agentsdk.annotation.ReActAgent;
 import com.meg.agentsdk.core.Agent;
 
-@ReactAgentRouter(
+@ReActAgent(
         name = "gst-od-assistant",
         model = "${agent.model}",
         mcp = {

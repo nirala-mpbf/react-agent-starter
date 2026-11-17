@@ -4,10 +4,11 @@ import com.meg.agentsdk.core.AgentResponse;
 import com.meg.agentsdk.prompt.PromptManagementTest.DdAgent;
 import com.meg.agentsdk.prompt.PromptManagementTest.GstAgent;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.agent.RuntimeContext;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
-import com.meg.agentsdk.annotation.ReactAgentRouter;
+import com.meg.agentsdk.annotation.ReActAgent;
 import com.meg.agentsdk.annotation.McpServer;
 import com.meg.agentsdk.prompt.api.*;
 import com.meg.agentsdk.prompt.cache.PromptCacheService;
@@ -43,11 +44,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class PromptManagementTest {
-    @ReactAgentRouter(name = "gst", workflow = "gst", prompt = "master",
+    private RuntimeContext newChatContext() {
+        return RuntimeContext.builder().sessionId(UUID.randomUUID().toString()).put("referenceId", "TEST-REF").build();
+    }
+
+    @ReActAgent(name = "gst", workflow = "gst", prompt = "master",
             mcp = @McpServer(name = "brain", url = "${test.mcp-url}"), allowedTools = "get_current_status")
     static class GstAgent extends com.meg.agentsdk.core.Agent {}
 
-    @ReactAgentRouter(name = "dd", workflow = "dd", prompt = "master",
+    @ReActAgent(name = "dd", workflow = "dd", prompt = "master",
             mcp = @McpServer(name = "brain", url = "${test.mcp-url}"), allowedTools = "verify_otp")
     static class DdAgent extends com.meg.agentsdk.core.Agent {}
 
@@ -74,38 +79,57 @@ class PromptManagementTest {
                 GstAgent gst = context.getBean(GstAgent.class);
                 DdAgent dd = context.getBean(DdAgent.class);
                 savedAgent.set(gst);
-                assertThatThrownBy(() -> reactor.core.publisher.Mono.fromCallable(() -> gst.ask("bad blocking call"))
-                        .subscribeOn(reactor.core.scheduler.Schedulers.parallel()).block())
-                        .hasMessageContaining("Use askAsync");
                 assertThat(backend.modelRequests).isEmpty();
-                assertThat(gst.ask("first").content()).isEqualTo("System SOP|first");
-                assertThat(dd.ask("second").content()).isEqualTo("DD SOP|second");
+                RuntimeContext session = RuntimeContext.builder().userId("user").sessionId("session").put("referenceId", "TEST-REF").build();
+                assertThat(gst.askAsync("first", session)
+                        .block(Duration.ofSeconds(20)).content())
+                        .contains("System SOP")
+                        .contains("referenceId = \"TEST-REF\"")
+                        .endsWith("|first");
+
+                assertThat(dd.askAsync("second", newChatContext())
+                        .block(Duration.ofSeconds(20)).content())
+                        .contains("DD SOP")
+                        .contains("referenceId = \"TEST-REF\"")
+                        .endsWith("|second");
                 assertThat(backend.downloads.get()).isEqualTo(2);
-                assertThat(gst.ask("cached").content()).isEqualTo("System SOP|cached");
+                int requestCount = backend.modelRequests.size();
+                        assertThat(gst.askAsync("cached", session)
+                                .block(Duration.ofSeconds(20)).content())
+                                .contains("System SOP")
+                                .contains("referenceId = \"TEST-REF\"")
+                                .endsWith("|cached");                assertThat(backend.modelRequests.subList(requestCount, backend.modelRequests.size()))
+                        .allSatisfy(request -> assertThat(request).doesNotContain("\"first\""));
                 assertThat(backend.downloads.get()).isEqualTo(2);
                 try {
                     context.getBean(PromptService.class).save("gst", "master",
                             new ByteArrayResource("System SOP version c1".getBytes()));
                 } catch (Exception error) { throw new AssertionError(error); }
                 List<AgentResponse> replies = reactor.core.publisher.Flux.range(0, 4)
-                        .flatMap(i -> gst.askAsync("parallel-" + i)).collectList().block(Duration.ofSeconds(20));
-                assertThat(replies).hasSize(4).allSatisfy(reply ->
-                        assertThat(reply.content()).startsWith("System SOP version c1|parallel-"));
+                        .flatMap(i -> gst.askAsync("parallel-" + i, newChatContext())).collectList().block(Duration.ofSeconds(20));
+                        assertThat(replies)
+                                .hasSize(4)
+                                .allSatisfy(reply ->
+                                        assertThat(reply.content())
+                                                .contains("System SOP version c1")
+                                                .contains("referenceId = \"TEST-REF\"")
+                                                .contains("|parallel-")
+                                );
                 for (String body : backend.modelRequests) {
                     if (body.contains("DD SOP")) assertThat(body).contains("verify_otp").doesNotContain("get_current_status");
                     else assertThat(body).contains("get_current_status").doesNotContain("verify_otp");
                 }
                 assertThat(backend.initializations.get()).isEqualTo(2);
                 assertThat(backend.toolCalls.get()).isEqualTo(7);
-                assertThatThrownBy(() -> gst.ask(" ")).hasMessageContaining("Query must not be blank");
-                assertThatThrownBy(() -> gst.ask("query", null)).hasMessageContaining("Runtime context is required");
+                assertThatThrownBy(() -> gst.askAsync(" ", newChatContext()).block(Duration.ofSeconds(20))).hasMessageContaining("Query must not be blank");
+                assertThatThrownBy(() -> gst.askAsync("query", null).block(Duration.ofSeconds(20))).hasMessageContaining("Runtime context is required");
             });
-            assertThatThrownBy(() -> savedAgent.get().ask("after shutdown")).hasMessageContaining("not active");
+            assertThatThrownBy(() -> savedAgent.get().askAsync("after shutdown", newChatContext()).block(Duration.ofSeconds(20))).hasMessageContaining("not active");
             assertThat(backend.errors).isEmpty();
         }
     }
 
-    @ReactAgentRouter(name = "plain")
+    @ReActAgent(name = "plain")
     static class PlainAgent extends com.meg.agentsdk.core.Agent {}
 
     @Test void typedAgentWorksWithoutOptionalPromptLibraries() {
@@ -118,16 +142,16 @@ class PromptManagementTest {
     }
 
     @Configuration(proxyBeanMethods = false)
-    @ReactAgentRouter
+    @ReActAgent
     static class CoreAgent extends com.meg.agentsdk.core.Agent {}
 
     @Configuration(proxyBeanMethods = false)
-    @ReactAgentRouter(name = "prompted", workflow = "${test.workflow:ddod}", prompt = "${test.prompt:master}",
+    @ReActAgent(name = "prompted", workflow = "${test.workflow:ddod}", prompt = "${test.prompt:master}",
             mcp = @McpServer(name = "brain", url = "${test.mcp-url}"), allowedTools = "get_current_status")
     static class PromptedAgent extends com.meg.agentsdk.core.Agent {}
 
     @Configuration(proxyBeanMethods = false)
-    @ReactAgentRouter(workflow = "ddod")
+    @ReActAgent(workflow = "ddod")
     static class IncompleteSelection extends com.meg.agentsdk.core.Agent {}
 
     @Configuration(proxyBeanMethods = false)
@@ -245,16 +269,26 @@ class PromptManagementTest {
                 PromptVersionRepository versions = context.getBean(PromptVersionRepository.class);
                 versions.activateVersion("prompts/ddod/master.md", "c0");
                 PromptedAgent agent = context.getBean(PromptedAgent.class);
-                assertThat(agent.ask("first").content()).isEqualTo("System SOP|first");
+                        assertThat(agent.askAsync("first", newChatContext())
+                                .block(Duration.ofSeconds(20)).content())
+                                .contains("System SOP")
+                                .contains("referenceId = \"TEST-REF\"")
+                                .endsWith("|first");
                 assertThat(backend.downloads.get()).isEqualTo(1);
-                assertThat(agent.ask("second").content()).isEqualTo("System SOP|second");
-                assertThat(backend.downloads.get()).isEqualTo(1); // Original Redis hit path.
+                        assertThat(agent.askAsync("second", newChatContext())
+                                .block(Duration.ofSeconds(20)).content())
+                                .contains("System SOP")
+                                .contains("referenceId = \"TEST-REF\"")
+                                .endsWith("|second");                assertThat(backend.downloads.get()).isEqualTo(1); // Original Redis hit path.
                 PromptService prompts = context.getBean(PromptService.class);
                 SavePromptResponse saved = prompts.save("ddod", "master", new ByteArrayResource("System SOP version c1".getBytes()));
                 assertThat(saved.commitId()).isEqualTo("c1");
                 assertThat(cache).isEmpty(); // Original save flow evicts the old entry.
-                assertThat(agent.ask("after").content()).isEqualTo("System SOP version c1|after");
-                assertThat(backend.downloads.get()).isEqualTo(2);
+                        assertThat(agent.askAsync("after", newChatContext())
+                                .block(Duration.ofSeconds(20)).content())
+                                .contains("System SOP version c1")
+                                .contains("referenceId = \"TEST-REF\"")
+                                .endsWith("|after");                assertThat(backend.downloads.get()).isEqualTo(2);
                 assertThat(backend.initializations.get()).isEqualTo(1);
                 assertThat(backend.downloadAuthorization).isEqualTo("Basic YWNjZXNzOnNlY3JldA==");
                 assertThat(backend.uploadBodies.getFirst()).contains("System SOP version c1");

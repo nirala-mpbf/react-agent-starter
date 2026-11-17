@@ -5,7 +5,9 @@ import com.sun.net.httpserver.HttpServer;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import java.io.OutputStream;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
@@ -60,11 +62,16 @@ class AgentBuilderFactoryTest {
         AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of("get_current_status"), environment(), client);
         factory.afterPropertiesSet();
         try {
-            try (HarnessAgent agent = factory.buildWithPrompt(null, null).sysPrompt("one").build()) {
-                assertThat(agent.getToolkit().getToolNames()).containsExactly("get_current_status");
-            }
-            try (HarnessAgent agent = factory.buildWithPrompt(null, null).sysPrompt("two").build()) {
-                assertThat(agent.getToolkit().getToolNames()).containsExactly("get_current_status");
+            List<HarnessAgent> agents = reactor.core.publisher.Flux.range(0, 2)
+                    .flatMap(i -> Mono.fromCallable(factory::getOrCreateHarnessAgent)
+                            .subscribeOn(reactor.core.scheduler.Schedulers.parallel()))
+                    .collectList().block(Duration.ofSeconds(10));
+            assertThat(agents).hasSize(2);
+            assertThat(agents.get(0)).isSameAs(agents.get(1));
+            assertThat(agents.get(0).getToolkit().getToolNames()).containsExactly("get_current_status");
+            synchronized (factory) {
+                assertThat(CompletableFuture.supplyAsync(factory::getOrCreateHarnessAgent).get(5, TimeUnit.SECONDS))
+                        .isSameAs(agents.get(0));
             }
             verify(client, never()).close();
         } finally {
@@ -72,13 +79,15 @@ class AgentBuilderFactoryTest {
             factory.destroy();
         }
         verify(client, times(1)).close();
+        assertThatThrownBy(factory::getOrCreateHarnessAgent).hasMessageContaining("not active");
     }
 
     @Test void omittedFilterExposesAllMcpToolsWithoutAddingApprovals() throws Exception {
         McpClientWrapper client = client("brain", "get_current_status", "verify_otp");
         AgentBuilderFactory factory = factory(List.of(endpoint("brain")), List.of(), environment(), client);
         factory.afterPropertiesSet();
-        try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
+        try {
+            HarnessAgent agent = factory.getOrCreateHarnessAgent();
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("get_current_status", "verify_otp");
             assertThat(factory.configurePermissions().getAllowRules()).isEmpty();
         } finally { factory.destroy(); }
@@ -87,7 +96,8 @@ class AgentBuilderFactoryTest {
     @Test void noMcpMeansNoToolsIncludingBuiltInTools() {
         AgentBuilderFactory factory = factory(List.of(), List.of(), environment());
         factory.afterPropertiesSet();
-        try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
+        try {
+            HarnessAgent agent = factory.getOrCreateHarnessAgent();
             assertThat(agent.getToolkit().getToolNames()).isEmpty();
         } finally { factory.destroy(); }
     }
@@ -126,7 +136,8 @@ class AgentBuilderFactoryTest {
         AgentBuilderFactory factory = factory(List.of(endpoint("brain"), endpoint("lentra")),
                 List.of("get_current_status", "submit_profile"), environment(), brain, lentra);
         factory.afterPropertiesSet();
-        try (HarnessAgent agent = factory.buildWithPrompt(null, null).build()) {
+        try {
+            HarnessAgent agent = factory.getOrCreateHarnessAgent();
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("get_current_status", "submit_profile");
         } finally { factory.destroy(); }
         verify(brain).close();
@@ -173,7 +184,7 @@ class AgentBuilderFactoryTest {
                 .hasMessageContaining("must be positive");
     }
     @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
-    @com.meg.agentsdk.annotation.ReactAgentRouter(name = "live", model = "${agent.model}",
+    @com.meg.agentsdk.annotation.ReActAgent(name = "live", model = "${agent.model}",
         mcp = @com.meg.agentsdk.annotation.McpServer(name = "brain", url = "${test.mcp-url}"),
         allowedTools = "get_current_status")
     static class LiveConfiguration extends com.meg.agentsdk.core.Agent {}
@@ -249,8 +260,8 @@ class AgentBuilderFactoryTest {
                         LiveConfiguration agent = context.getBean(LiveConfiguration.class);
                         for (int i = 0; i < 2; i++) {
                             io.agentscope.core.agent.RuntimeContext execution = io.agentscope.core.agent.RuntimeContext.builder()
-                                    .userId("user").sessionId("session-" + i).build();
-                            assertThat(agent.askAsync("What is my status?", execution, "Use the status tool.")
+                                    .userId("user").sessionId("session-" + i).put("referenceId", "TEST-REF").build();
+                            assertThat(agent.askAsync("What is my status?", execution)
                                     .block(Duration.ofSeconds(15)).content()).contains("OTP_PENDING");
                         }
                     });

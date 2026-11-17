@@ -11,7 +11,7 @@ import java.lang.annotation.*;
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Import({PromptConfiguration.class, MemoryConfiguration.class})
-public @interface ReactAgentRouter {
+public @interface ReActAgent {
 
     String name() default "reactAgent";
 

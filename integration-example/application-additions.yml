@@ -37,7 +37,6 @@ react-agent:
     datasource-bean: agentMemoryDataSource
   prompts:
     datasource-bean: promptMetadataDataSource
-    attach-reference-id: true
     enabled: true
     controller-enabled: true # Enable only when the host protects the prompt administration endpoints.
   mcp:
